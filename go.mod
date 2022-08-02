@@ -1,14 +1,10 @@
 module github.com/axieinfinity/bridge-core
 
-replace (
-	github.com/axieinfinity/bridge-contracts => ../bridge-contracts
-	github.com/ethereum/go-ethereum => ../ronin
-)
+replace github.com/ethereum/go-ethereum => ../ronin
 
 go 1.17
 
 require (
-	github.com/axieinfinity/bridge-contracts v0.0.0-00010101000000-000000000000
 	github.com/ethereum/go-ethereum v0.0.0-00010101000000-000000000000
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/prometheus/client_golang v1.12.2
@@ -21,6 +17,7 @@ require (
 require (
 	github.com/StackExchange/wmi v1.2.1 // indirect
 	github.com/VictoriaMetrics/fastcache v1.6.0 // indirect
+	github.com/axieinfinity/bridge-contracts v0.0.0-20220731110242-d273b578b657 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/btcsuite/btcd v0.20.1-beta // indirect
 	github.com/cespare/xxhash/v2 v2.1.2 // indirect
