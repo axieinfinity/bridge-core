@@ -9,6 +9,7 @@ import (
 	"github.com/axieinfinity/bridge-core/utils"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"math/big"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -50,6 +51,7 @@ type Worker struct {
 	successChan chan<- JobHandler
 
 	listeners map[string]Listener
+	isClose   int32
 }
 
 func NewWorker(ctx context.Context, id int, mainChan, failedChan, successChan chan<- JobHandler, queue chan chan JobHandler, size int, listeners map[string]Listener) *Worker {
@@ -77,8 +79,10 @@ func (w *Worker) start() {
 		}
 	}()
 	for {
-		// push worker chan into queue
-		w.queue <- w.workerChan
+		// push worker chan into queue if worker has not closed yet
+		if atomic.LoadInt32(&w.isClose) == 0 {
+			w.queue <- w.workerChan
+		}
 		select {
 		case job := <-w.workerChan:
 			log.Info("processing job", "id", job.GetID(), "nextTry", job.GetNextTry(), "retryCount", job.GetRetryCount(), "type", job.GetType())
@@ -89,6 +93,7 @@ func (w *Worker) start() {
 			// push the job back to mainChan
 			w.mainChan <- job
 		case <-w.ctx.Done():
+			atomic.StoreInt32(&w.isClose, 1)
 			close(w.workerChan)
 			return
 		}
