@@ -331,7 +331,7 @@ func (c *Controller) processPendingJobs() {
 	}
 	for _, job := range jobs {
 		listener, ok := c.listeners[job.Listener]
-		if !ok {
+		if !ok || listener.IsDisabled() {
 			continue
 		}
 		if job.Type == CallbackHandler && job.Method == "" {
