@@ -31,7 +31,7 @@ func RunPusher(ctx context.Context) {
 	Pusher = prometheus.NewPusher()
 	Pusher.AddCounter(PreparingFailedJobMetric, "count number of preparing jobs failed to added to database")
 	Pusher.AddCounter(PreparingSuccessJobMetric, "count number of preparing jobs added to database successfully and switch to new ")
-	Pusher.AddCounter(ProcessingJobMetric, "count number of processing jobs in jobChan")
+	Pusher.AddGauge(ProcessingJobMetric, "count number of processing jobs in jobChan")
 	Pusher.AddCounter(ProcessedSuccessJobMetric, "count number of processed jobs successfully")
 	Pusher.AddCounter(ProcessedFailedJobMetric, "count number of failed jobs")
 	Pusher.AddCounter(PendingTaskMetric, "count number of pending tasks in queue")

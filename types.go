@@ -58,7 +58,10 @@ type Listener interface {
 	GetInitHeight() uint64
 
 	GetEthClient() utils.EthClient
-	GetTask() TaskHandler
+
+	GetTasks() []TaskHandler
+	GetTask(index int) TaskHandler
+	AddTask(handler TaskHandler)
 
 	IsUpTodate() bool
 	SetPrepareJobChan(chan JobHandler)

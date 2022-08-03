@@ -100,7 +100,7 @@ func (w *Worker) processJob(job JobHandler) {
 		err error
 		val []byte
 	)
-	defer metrics.Pusher.IncrCounter(metrics.ProcessingJobMetric, -1)
+	defer metrics.Pusher.IncrGauge(metrics.ProcessingJobMetric, -1)
 
 	val, err = job.Process()
 	if err != nil {

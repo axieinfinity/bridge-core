@@ -28,13 +28,13 @@ const (
 	defaultTaskInterval     = 3
 )
 
-var listeners map[string]func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore) Listener
+var listeners map[string]func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore, helpers utils.Utils) Listener
 
 func init() {
-	listeners = make(map[string]func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore) Listener)
+	listeners = make(map[string]func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore, helpers utils.Utils) Listener)
 }
 
-func AddListener(name string, initFunc func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore) Listener) {
+func AddListener(name string, initFunc func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore, helpers utils.Utils) Listener) {
 	listeners[name] = initFunc
 }
 
@@ -131,7 +131,7 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 		if !ok {
 			continue
 		}
-		l := initFunc(c.ctx, lsConfig, c.store)
+		l := initFunc(c.ctx, lsConfig, c.store, helpers)
 		if l == nil {
 			return nil, errors.New("listener is nil")
 		}
@@ -554,7 +554,7 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 					continue
 				}
 				metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
-				metrics.Pusher.IncrCounter(metrics.ProcessingJobMetric, 1)
+				metrics.Pusher.IncrGauge(metrics.ProcessingJobMetric, 1)
 				c.JobChan <- job
 			}
 		}
