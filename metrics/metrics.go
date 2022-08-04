@@ -2,6 +2,7 @@ package metrics
 
 import (
 	"context"
+
 	"github.com/axieinfinity/bridge-core/adapters/prometheus"
 )
 
@@ -21,6 +22,12 @@ const (
 	WithdrawalTaskMetric    string = "Ronin/tasks/withdrawal"
 	DepositTaskMetric       string = "Ronin/tasks/deposit"
 	AckWithdrawalTaskMetric string = "Ronin/tasks/acknowledgeWithdrawal"
+
+	KmsSuccessSign     string = "kms/success"
+	KmsNetworkFailure  string = "kms/failure/network"
+	KmsInternalFailure string = "kms/failure/internal"
+	KmsSignLatency     string = "kms/latency"
+	KmsLastSuccess     string = "kms/lastSuccess"
 )
 
 var (
@@ -41,6 +48,11 @@ func RunPusher(ctx context.Context) {
 	Pusher.AddCounter(WithdrawalTaskMetric, "count number of ronin’s withdrawal tasks occurred")
 	Pusher.AddCounter(DepositTaskMetric, "count number of ronin’s deposit tasks occurred")
 	Pusher.AddCounter(AckWithdrawalTaskMetric, "count number of ronin acknowledge withdrawal tasks occurred")
+	Pusher.AddCounter(KmsSuccessSign, "count number of successful KMS signs")
+	Pusher.AddCounter(KmsNetworkFailure, "count number of failed KMS signs due to network")
+	Pusher.AddCounter(KmsInternalFailure, "count number of KMS server error responses")
+	Pusher.AddHistogram(KmsSignLatency, "the latency of signing request to KMS server in milliseconds")
+	Pusher.AddGauge(KmsLastSuccess, "timestamp of last KMS successful signs")
 
 	go Pusher.Start(ctx)
 }

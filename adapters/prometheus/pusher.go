@@ -2,18 +2,20 @@ package prometheus
 
 import (
 	"context"
-	"github.com/axieinfinity/bridge-core/adapters"
 	"time"
+
+	"github.com/axieinfinity/bridge-core/adapters"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 )
 
 type Pusher struct {
-	counters map[string]prometheus.Counter
-	gauges   map[string]prometheus.Gauge
-	registry *prometheus.Registry
-	pusher   *push.Pusher
+	counters   map[string]prometheus.Counter
+	gauges     map[string]prometheus.Gauge
+	histograms map[string]prometheus.Histogram
+	registry   *prometheus.Registry
+	pusher     *push.Pusher
 }
 
 func (p *Pusher) AddCounter(name string, description string) *Pusher {
@@ -56,6 +58,35 @@ func (p *Pusher) IncrGauge(name string, value int) {
 	}
 
 	p.gauges[name].Add(float64(value))
+}
+
+func (p *Pusher) SetGauge(name string, value int) {
+	if _, ok := p.gauges[name]; !ok {
+		return
+	}
+
+	p.gauges[name].Set(float64(value))
+}
+
+func (p *Pusher) AddHistogram(name string, description string) *Pusher {
+	if _, ok := p.histograms[name]; ok {
+		return p
+	}
+
+	histogram := prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name: name,
+		Help: description,
+	})
+	p.pusher.Collector(histogram)
+	return p
+}
+
+func (p *Pusher) ObserveHistogram(name string, value int) {
+	if _, ok := p.histograms[name]; !ok {
+		return
+	}
+
+	p.histograms[name].Observe(float64(value))
 }
 
 func (p *Pusher) Push() error {
