@@ -2,23 +2,23 @@ package utils
 
 import (
 	"context"
-	"crypto/ecdsa"
 	"errors"
 	"fmt"
+	"math/big"
+	"os"
+	"reflect"
+
+	kmsUtils "github.com/axieinfinity/ronin-kms-client/utils"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/ethereum/go-ethereum/signer/core"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
-	"math/big"
-	"os"
-	"reflect"
 )
 
 type EthClient interface {
@@ -40,8 +40,8 @@ type Utils interface {
 	UnpackToInterface(a abi.ABI, name string, data []byte, isInput bool, v interface{}) error
 	Title(text string) string
 	NewEthClient(url string) (EthClient, error)
-	SendContractTransaction(key *ecdsa.PrivateKey, chainId *big.Int, fn func(opts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error)
-	SignTypedData(typedData core.TypedData, privateKey *ecdsa.PrivateKey) (hexutil.Bytes, error)
+	SendContractTransaction(signMethod ISign, chainId *big.Int, fn func(opts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error)
+	SignTypedData(typedData core.TypedData, signMethod ISign) (hexutil.Bytes, error)
 	FilterLogs(client EthClient, opts *bind.FilterOpts, contractAddresses []common.Address, filteredMethods map[*abi.ABI]map[string]struct{}) ([]types.Log, error)
 }
 
@@ -140,11 +140,31 @@ func (u *utils) NewEthClient(url string) (EthClient, error) {
 	return ethclient.Dial(url)
 }
 
-func (u *utils) SendContractTransaction(key *ecdsa.PrivateKey, chainId *big.Int, fn func(opts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error) {
-	if key == nil {
-		return nil, nil
-	}
-	opts, err := bind.NewKeyedTransactorWithChainID(key, chainId)
+func newKeyedTransactorWithChainID(signMethod ISign, chainID *big.Int) (*bind.TransactOpts, error) {
+	keyAddr := signMethod.GetAddress()
+	signer := types.LatestSignerForChainID(chainID)
+	return &bind.TransactOpts{
+		From: keyAddr,
+		Signer: func(address common.Address, tx *types.Transaction) (*types.Transaction, error) {
+			if address != keyAddr {
+				return nil, bind.ErrNotAuthorized
+			}
+			encodedTx, err := kmsUtils.RlpEncode(tx, chainID)
+			if err != nil {
+				return nil, err
+			}
+			signature, err := signMethod.Sign(encodedTx, "non-ether")
+			if err != nil {
+				return nil, err
+			}
+			return tx.WithSignature(signer, signature)
+		},
+		Context: context.Background(),
+	}, nil
+}
+
+func (u *utils) SendContractTransaction(signMethod ISign, chainId *big.Int, fn func(opts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error) {
+	opts, err := newKeyedTransactorWithChainID(signMethod, chainId)
 	if err != nil {
 		return nil, err
 	}
@@ -156,12 +176,12 @@ func (u *utils) SendContractTransaction(key *ecdsa.PrivateKey, chainId *big.Int,
 // It returns
 // - the signature,
 // - and/or any error
-func (u *utils) SignTypedData(typedData core.TypedData, privateKey *ecdsa.PrivateKey) (hexutil.Bytes, error) {
-	return u.signTypedData(typedData, privateKey)
+func (u *utils) SignTypedData(typedData core.TypedData, signMethod ISign) (hexutil.Bytes, error) {
+	return u.signTypedData(typedData, signMethod)
 }
 
 // signTypedData is identical to the capitalized version
-func (u *utils) signTypedData(typedData core.TypedData, privateKey *ecdsa.PrivateKey) (hexutil.Bytes, error) {
+func (u *utils) signTypedData(typedData core.TypedData, signMethod ISign) (hexutil.Bytes, error) {
 	domainSeparator, err := typedData.HashStruct("EIP712Domain", typedData.Domain.Map())
 	if err != nil {
 		return nil, err
@@ -171,7 +191,7 @@ func (u *utils) signTypedData(typedData core.TypedData, privateKey *ecdsa.Privat
 		return nil, err
 	}
 	rawData := []byte(fmt.Sprintf("\x19\x01%s%s", string(domainSeparator), string(typedDataHash)))
-	signature, err := crypto.Sign(crypto.Keccak256(rawData), privateKey)
+	signature, err := signMethod.Sign(rawData, "non-ether")
 	if err != nil {
 		return nil, err
 	}

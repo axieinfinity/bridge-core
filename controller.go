@@ -131,7 +131,7 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 		if !ok {
 			continue
 		}
-		l := initFunc(c.ctx, lsConfig, c.store, helpers)
+		l := initFunc(c.ctx, lsConfig, c.store, c.utilWrapper)
 		if l == nil {
 			return nil, errors.New("listener is nil")
 		}

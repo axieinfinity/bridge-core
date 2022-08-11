@@ -2,14 +2,15 @@ package internal
 
 import (
 	"context"
+	"math/big"
+	"time"
+
 	"github.com/axieinfinity/bridge-core/models"
 	"github.com/axieinfinity/bridge-core/stores"
 	"github.com/axieinfinity/bridge-core/utils"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"math/big"
-	"time"
 )
 
 const (
@@ -65,6 +66,9 @@ type Listener interface {
 
 	IsUpTodate() bool
 	SetPrepareJobChan(chan JobHandler)
+
+	GetValidatorSign() utils.ISign
+	GetRelayerSign() utils.ISign
 }
 
 type Transaction interface {
@@ -179,8 +183,8 @@ type LsConfig struct {
 }
 
 type Secret struct {
-	Validator string `json:"validator"`
-	Relayer   string `json:"relayer"`
+	Validator *utils.SignMethodConfig `json:"validator"`
+	Relayer   *utils.SignMethodConfig `json:"relayer"`
 }
 
 type Subscribe struct {
