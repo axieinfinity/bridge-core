@@ -184,9 +184,23 @@ func (c *Controller) prepareJob(job JobHandler) error {
 	if job == nil {
 		return nil
 	}
+	// deduplication: get hash from data and type and check if it exists in `processedJobs` or not.
+	hash := c.utilWrapper.RlpHash(struct {
+		Data []byte
+		Type int
+	}{
+		Data: job.GetData(),
+		Type: job.GetType(),
+	})
+	if _, ok := c.processedJobs.Load(hash); ok {
+		return nil
+	}
+	// save job to db if id = 0
 	if job.GetID() == 0 {
 		return job.Save()
 	}
+	// cache above hash to `processedJobs`
+	c.processedJobs.Store(hash, struct{}{})
 	return nil
 }
 
@@ -408,7 +422,7 @@ func (c *Controller) startListening(listener Listener, tryCount int) {
 		log.Error("[Controller][startListener] error while get latest block", "err", err, "listener", listener.GetName())
 		// otherwise retry startListener
 		time.Sleep(time.Duration(tryCount+1) * time.Second)
-		go c.startListening(listener, tryCount+1)
+		c.startListening(listener, tryCount+1)
 		return
 	}
 	// reset fromHeight if it is out of allowed blocks range
@@ -422,7 +436,8 @@ func (c *Controller) startListening(listener Listener, tryCount int) {
 		if err := c.processBehindBlock(listener, currentBlock.GetHeight(), latestBlockHeight); err != nil {
 			log.Error("[Controller][startListener] error while processing behind block", "err", err, "height", currentBlock.GetHeight(), "latestBlockHeight", latestBlockHeight)
 			time.Sleep(time.Duration(tryCount+1) * time.Second)
-			go c.startListening(listener, tryCount+1)
+			c.startListening(listener, tryCount+1)
+			return
 		}
 	}
 	// start listening to block's events
@@ -496,7 +511,11 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 	var (
 		contractAddresses []common.Address
 	)
-	chainId, _ := listener.GetChainID()
+	chainId, err := listener.GetChainID()
+	if err != nil {
+		log.Error("[Controller][processBatchLogs] error while getting chainID", "err", err, "listener", listener.GetName())
+		return fromHeight
+	}
 	addedContract := make(map[common.Address]struct{})
 	filteredMethods := make(map[*abi.ABI]map[string]struct{})
 	eventIds := make(map[common.Hash]string)
