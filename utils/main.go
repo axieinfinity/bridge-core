@@ -4,9 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/rlp"
+	"golang.org/x/crypto/sha3"
 	"math/big"
 	"os"
 	"reflect"
+	"sync"
 
 	kmsUtils "github.com/axieinfinity/ronin-kms-client/utils"
 	"github.com/ethereum/go-ethereum"
@@ -20,6 +24,11 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
+
+// hasherPool holds LegacyKeccak256 hashers for rlpHash.
+var hasherPool = sync.Pool{
+	New: func() interface{} { return sha3.NewLegacyKeccak256() },
+}
 
 type EthClient interface {
 	ethereum.ChainReader
@@ -43,6 +52,7 @@ type Utils interface {
 	SendContractTransaction(signMethod ISign, chainId *big.Int, fn func(opts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error)
 	SignTypedData(typedData core.TypedData, signMethod ISign) (hexutil.Bytes, error)
 	FilterLogs(client EthClient, opts *bind.FilterOpts, contractAddresses []common.Address, filteredMethods map[*abi.ABI]map[string]struct{}) ([]types.Log, error)
+	RlpHash(x interface{}) (h common.Hash)
 }
 
 type utils struct{}
@@ -227,4 +237,13 @@ func (u *utils) FilterLogs(client EthClient, opts *bind.FilterOpts, contractAddr
 		config.ToBlock = new(big.Int).SetUint64(*opts.End)
 	}
 	return client.FilterLogs(opts.Context, config)
+}
+
+func (u *utils) RlpHash(x interface{}) (h common.Hash) {
+	sha := hasherPool.Get().(crypto.KeccakState)
+	defer hasherPool.Put(sha)
+	sha.Reset()
+	rlp.Encode(sha, x)
+	sha.Read(h[:])
+	return h
 }
