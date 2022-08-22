@@ -77,6 +77,7 @@ func (p *Pusher) AddGaugeWithLabel(name string, description string, labels map[s
 		Help:        description,
 		ConstLabels: labels,
 	})
+	p.gauges[name] = gauge
 	p.pusher.Collector(gauge)
 	return p
 }
@@ -105,6 +106,21 @@ func (p *Pusher) AddHistogram(name string, description string) *Pusher {
 	histogram := prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name: name,
 		Help: description,
+	})
+	p.histograms[name] = histogram
+	p.pusher.Collector(histogram)
+	return p
+}
+
+func (p *Pusher) AddHistogramWithLabels(name string, description string, labels map[string]string) *Pusher {
+	if _, ok := p.histograms[name]; ok {
+		return p
+	}
+
+	histogram := prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:        name,
+		Help:        description,
+		ConstLabels: labels,
 	})
 	p.histograms[name] = histogram
 	p.pusher.Collector(histogram)
