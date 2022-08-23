@@ -7,27 +7,27 @@ import (
 )
 
 const (
-	ListenerProcessedBlockMetric string = "%s/processedBlock"
+	ListenerProcessedBlockMetric string = "%s_processedBlock"
 
-	PreparingFailedJobMetric  string = "jobs/prepare/failed"
-	PreparingSuccessJobMetric string = "jobs/prepare/success"
-	ProcessingJobMetric       string = "jobs/processing"
-	ProcessedSuccessJobMetric string = "jobs/success"
-	ProcessedFailedJobMetric  string = "jobs/failed"
+	PreparingFailedJobMetric  string = "jobs_prepare_failed"
+	PreparingSuccessJobMetric string = "jobs_prepare_success"
+	ProcessingJobMetric       string = "jobs_processing"
+	ProcessedSuccessJobMetric string = "jobs_success"
+	ProcessedFailedJobMetric  string = "jobs_failed"
 
-	PendingTaskMetric       string = "Ronin/tasks/pending"
-	ProcessingTaskMetric    string = "Ronin/tasks/processing"
-	SuccessTaskMetric       string = "Ronin/tasks/success"
-	FailedTaskMetric        string = "Ronin/tasks/failed"
-	WithdrawalTaskMetric    string = "Ronin/tasks/withdrawal"
-	DepositTaskMetric       string = "Ronin/tasks/deposit"
-	AckWithdrawalTaskMetric string = "Ronin/tasks/acknowledgeWithdrawal"
+	PendingTaskMetric       string = "Ronin_tasks_pending"
+	ProcessingTaskMetric    string = "Ronin_tasks_processing"
+	SuccessTaskMetric       string = "Ronin_tasks_success"
+	FailedTaskMetric        string = "Ronin_tasks_failed"
+	WithdrawalTaskMetric    string = "Ronin_tasks_withdrawal"
+	DepositTaskMetric       string = "Ronin_tasks_deposit"
+	AckWithdrawalTaskMetric string = "Ronin_tasks_acknowledgeWithdrawal"
 
-	KmsSuccessSign     string = "kms/success"
-	KmsNetworkFailure  string = "kms/failure/network"
-	KmsInternalFailure string = "kms/failure/internal"
-	KmsSignLatency     string = "kms/latency"
-	KmsLastSuccess     string = "kms/lastSuccess"
+	KmsSuccessSign     string = "kms_success"
+	KmsNetworkFailure  string = "kms_failure/network"
+	KmsInternalFailure string = "kms_failure/internal"
+	KmsSignLatency     string = "kms_latency"
+	KmsLastSuccess     string = "kms_lastSuccess"
 )
 
 var (

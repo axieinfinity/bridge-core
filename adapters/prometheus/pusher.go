@@ -6,6 +6,7 @@ import (
 
 	"github.com/axieinfinity/bridge-core/adapters"
 
+	"github.com/ethereum/go-ethereum/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
 )
@@ -32,6 +33,21 @@ func (p *Pusher) AddCounter(name string, description string) *Pusher {
 	return p
 }
 
+func (p *Pusher) AddCounterWithLable(name string, description string, labels map[string]string) *Pusher {
+	if _, ok := p.counters[name]; ok {
+		return p
+	}
+
+	counter := prometheus.NewCounter(prometheus.CounterOpts{
+		Name:        name,
+		Help:        description,
+		ConstLabels: labels,
+	})
+	p.counters[name] = counter
+	p.pusher.Collector(counter)
+	return p
+}
+
 func (p *Pusher) IncrCounter(name string, value int) {
 	if _, ok := p.counters[name]; !ok {
 		return
@@ -43,11 +59,25 @@ func (p *Pusher) AddGauge(name string, description string) *Pusher {
 	if _, ok := p.gauges[name]; ok {
 		return p
 	}
-
 	gauge := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name: name,
 		Help: description,
 	})
+	p.gauges[name] = gauge
+	p.pusher.Collector(gauge)
+	return p
+}
+
+func (p *Pusher) AddGaugeWithLabel(name string, description string, labels map[string]string) *Pusher {
+	if _, ok := p.gauges[name]; ok {
+		return p
+	}
+	gauge := prometheus.NewGauge(prometheus.GaugeOpts{
+		Name:        name,
+		Help:        description,
+		ConstLabels: labels,
+	})
+	p.gauges[name] = gauge
 	p.pusher.Collector(gauge)
 	return p
 }
@@ -77,6 +107,22 @@ func (p *Pusher) AddHistogram(name string, description string) *Pusher {
 		Name: name,
 		Help: description,
 	})
+	p.histograms[name] = histogram
+	p.pusher.Collector(histogram)
+	return p
+}
+
+func (p *Pusher) AddHistogramWithLabels(name string, description string, labels map[string]string) *Pusher {
+	if _, ok := p.histograms[name]; ok {
+		return p
+	}
+
+	histogram := prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:        name,
+		Help:        description,
+		ConstLabels: labels,
+	})
+	p.histograms[name] = histogram
 	p.pusher.Collector(histogram)
 	return p
 }
@@ -95,12 +141,18 @@ func (p *Pusher) Push() error {
 
 func (p *Pusher) Start(ctx context.Context) {
 	ticker := time.NewTicker(time.Second * time.Duration(adapters.AppConfig.Prometheus.PushInterval))
-	select {
-	case <-ticker.C:
-		p.pusher.Push()
-	case <-ctx.Done():
-		ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := p.Push(); err != nil {
+				log.Error("Push metrics got error", err)
+			}
+		case <-ctx.Done():
+			ticker.Stop()
+			return
+		}
 	}
+
 }
 
 func NewPusher() *Pusher {
