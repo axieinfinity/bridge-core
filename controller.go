@@ -3,14 +3,16 @@ package internal
 import (
 	"context"
 	"errors"
-	"github.com/axieinfinity/bridge-contracts"
-	"github.com/axieinfinity/bridge-core/metrics"
-	"github.com/axieinfinity/bridge-core/stores"
-	"github.com/axieinfinity/bridge-core/utils"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	bridge_contracts "github.com/axieinfinity/bridge-contracts"
+	"github.com/axieinfinity/bridge-core/adapters"
+	"github.com/axieinfinity/bridge-core/metrics"
+	"github.com/axieinfinity/bridge-core/stores"
+	"github.com/axieinfinity/bridge-core/utils"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -101,7 +103,9 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 		hasSubscriptionType: make(map[string]map[int]bool),
 	}
 
-	metrics.RunPusher(ctx)
+	if adapters.AppConfig.Prometheus.TurnOn {
+		metrics.RunPusher(ctx)
+	}
 
 	c.isClosed.Store(false)
 	if helpers != nil {
