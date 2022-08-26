@@ -158,8 +158,9 @@ func (p *Pusher) Start(ctx context.Context) {
 func NewPusher() *Pusher {
 	pusher := push.New(adapters.AppConfig.Prometheus.PushURL, adapters.AppConfig.Prometheus.PushJob)
 	return &Pusher{
-		pusher:   pusher,
-		counters: make(map[string]prometheus.Counter),
-		gauges:   make(map[string]prometheus.Gauge),
+		pusher:     pusher,
+		counters:   make(map[string]prometheus.Counter),
+		gauges:     make(map[string]prometheus.Gauge),
+		histograms: make(map[string]prometheus.Histogram),
 	}
 }
