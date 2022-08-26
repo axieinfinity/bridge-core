@@ -12,6 +12,7 @@ type Prometheus struct {
 	PushURL      string `default:"localhost:9091" envconfig:"PUSH_URL"`
 	PushJob      string `default:"sm-bridge-v2" envconfig:"PUSH_JOB"`
 	PushInterval int    `default:"15" envconfig:"PUSH_INTERVAl"`
+	TurnOn       bool   `envconfig:"PROMETHEUS_TURN_ON"`
 }
 
 func New() (*Config, error) {
