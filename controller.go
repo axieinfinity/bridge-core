@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"errors"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -410,7 +411,7 @@ func (c *Controller) Wait() {
 func (c *Controller) startListening(listener Listener, tryCount int) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error("[Controller][startListener] recover from panic", "message", r)
+			log.Error("[Controller][startListener] recover from panic", "message", r, "trace", string(debug.Stack()))
 		}
 	}()
 	// panic when tryCount reaches 10 times panic

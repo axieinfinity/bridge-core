@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"runtime/debug"
 	"sync/atomic"
 	"time"
 
@@ -76,7 +77,7 @@ func (w *Worker) String() string {
 func (w *Worker) start() {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error("[Worker][addToQueue] recover from panic", "message", r)
+			log.Error("[Worker][addToQueue] recover from panic", "message", r, "trace", string(debug.Stack()))
 		}
 	}()
 	for {
