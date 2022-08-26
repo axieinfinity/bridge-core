@@ -17,6 +17,7 @@ type Pusher struct {
 	histograms map[string]prometheus.Histogram
 	registry   *prometheus.Registry
 	pusher     *push.Pusher
+	labels     map[string]string
 }
 
 func (p *Pusher) AddCounter(name string, description string) *Pusher {
@@ -25,8 +26,9 @@ func (p *Pusher) AddCounter(name string, description string) *Pusher {
 	}
 
 	counter := prometheus.NewCounter(prometheus.CounterOpts{
-		Name: name,
-		Help: description,
+		Name:        name,
+		Help:        description,
+		ConstLabels: p.labels,
 	})
 	p.counters[name] = counter
 	p.pusher.Collector(counter)
@@ -37,7 +39,9 @@ func (p *Pusher) AddCounterWithLable(name string, description string, labels map
 	if _, ok := p.counters[name]; ok {
 		return p
 	}
-
+	for k, v := range p.labels {
+		labels[k] = v
+	}
 	counter := prometheus.NewCounter(prometheus.CounterOpts{
 		Name:        name,
 		Help:        description,
@@ -59,9 +63,11 @@ func (p *Pusher) AddGauge(name string, description string) *Pusher {
 	if _, ok := p.gauges[name]; ok {
 		return p
 	}
+
 	gauge := prometheus.NewGauge(prometheus.GaugeOpts{
-		Name: name,
-		Help: description,
+		Name:        name,
+		Help:        description,
+		ConstLabels: p.labels,
 	})
 	p.gauges[name] = gauge
 	p.pusher.Collector(gauge)
@@ -72,6 +78,11 @@ func (p *Pusher) AddGaugeWithLabel(name string, description string, labels map[s
 	if _, ok := p.gauges[name]; ok {
 		return p
 	}
+
+	for k, v := range p.labels {
+		labels[k] = v
+	}
+
 	gauge := prometheus.NewGauge(prometheus.GaugeOpts{
 		Name:        name,
 		Help:        description,
@@ -104,8 +115,9 @@ func (p *Pusher) AddHistogram(name string, description string) *Pusher {
 	}
 
 	histogram := prometheus.NewHistogram(prometheus.HistogramOpts{
-		Name: name,
-		Help: description,
+		Name:        name,
+		Help:        description,
+		ConstLabels: p.labels,
 	})
 	p.histograms[name] = histogram
 	p.pusher.Collector(histogram)
@@ -116,7 +128,9 @@ func (p *Pusher) AddHistogramWithLabels(name string, description string, labels 
 	if _, ok := p.histograms[name]; ok {
 		return p
 	}
-
+	for k, v := range p.labels {
+		labels[k] = v
+	}
 	histogram := prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:        name,
 		Help:        description,
@@ -162,5 +176,8 @@ func NewPusher() *Pusher {
 		counters:   make(map[string]prometheus.Counter),
 		gauges:     make(map[string]prometheus.Gauge),
 		histograms: make(map[string]prometheus.Histogram),
+		labels: map[string]string{
+			"instance": adapters.AppConfig.Prometheus.InstanceName,
+		},
 	}
 }

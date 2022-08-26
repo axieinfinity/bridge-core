@@ -3,14 +3,15 @@ package internal
 import (
 	"context"
 	"fmt"
+	"math/big"
+	"sync/atomic"
+	"time"
+
 	"github.com/axieinfinity/bridge-core/metrics"
 	"github.com/axieinfinity/bridge-core/models"
 	"github.com/axieinfinity/bridge-core/stores"
 	"github.com/axieinfinity/bridge-core/utils"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"math/big"
-	"sync/atomic"
-	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
