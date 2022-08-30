@@ -24,8 +24,8 @@ const (
 	AckWithdrawalTaskMetric string = "Ronin_tasks_acknowledgeWithdrawal"
 
 	KmsSuccessSign     string = "kms_success"
-	KmsNetworkFailure  string = "kms_failure/network"
-	KmsInternalFailure string = "kms_failure/internal"
+	KmsNetworkFailure  string = "kms_failure_network"
+	KmsInternalFailure string = "kms_failure_internal"
 	KmsSignLatency     string = "kms_latency"
 	KmsLastSuccess     string = "kms_lastSuccess"
 )
