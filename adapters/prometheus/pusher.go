@@ -159,7 +159,7 @@ func (p *Pusher) Start(ctx context.Context) {
 		select {
 		case <-ticker.C:
 			if err := p.Push(); err != nil {
-				log.Error("Push metrics got error", err)
+				log.Error("Push metrics got error", err.Error())
 			}
 		case <-ctx.Done():
 			ticker.Stop()
