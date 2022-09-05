@@ -2,6 +2,7 @@ package prometheus
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/axieinfinity/bridge-core/adapters"
@@ -52,11 +53,12 @@ func (p *Pusher) AddCounterWithLable(name string, description string, labels map
 	return p
 }
 
-func (p *Pusher) IncrCounter(name string, value int) {
+func (p *Pusher) IncrCounter(name string, value int) error {
 	if _, ok := p.counters[name]; !ok {
-		return
+		return fmt.Errorf("counter %v was not initialized", name)
 	}
 	p.counters[name].Add(float64(value))
+	return nil
 }
 
 func (p *Pusher) AddGauge(name string, description string) *Pusher {
@@ -93,20 +95,22 @@ func (p *Pusher) AddGaugeWithLabel(name string, description string, labels map[s
 	return p
 }
 
-func (p *Pusher) IncrGauge(name string, value int) {
+func (p *Pusher) IncrGauge(name string, value int) error {
 	if _, ok := p.gauges[name]; !ok {
-		return
+		return fmt.Errorf("gauge %v was not initialized", name)
 	}
 
 	p.gauges[name].Add(float64(value))
+	return nil
 }
 
-func (p *Pusher) SetGauge(name string, value int) {
+func (p *Pusher) SetGauge(name string, value int) error {
 	if _, ok := p.gauges[name]; !ok {
-		return
+		return fmt.Errorf("gauge %v was not initialized", name)
 	}
 
 	p.gauges[name].Set(float64(value))
+	return nil
 }
 
 func (p *Pusher) AddHistogram(name string, description string) *Pusher {
@@ -141,12 +145,13 @@ func (p *Pusher) AddHistogramWithLabels(name string, description string, labels 
 	return p
 }
 
-func (p *Pusher) ObserveHistogram(name string, value int) {
+func (p *Pusher) ObserveHistogram(name string, value int) error {
 	if _, ok := p.histograms[name]; !ok {
-		return
+		return fmt.Errorf("histogram %v was not initialized", name)
 	}
 
 	p.histograms[name].Observe(float64(value))
+	return nil
 }
 
 func (p *Pusher) Push() error {

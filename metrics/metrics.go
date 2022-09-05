@@ -36,11 +36,13 @@ var (
 
 func RunPusher(ctx context.Context) {
 	Pusher = prometheus.NewPusher()
+
 	Pusher.AddCounter(PreparingFailedJobMetric, "count number of preparing jobs failed to added to database")
 	Pusher.AddCounter(PreparingSuccessJobMetric, "count number of preparing jobs added to database successfully and switch to new ")
 	Pusher.AddGauge(ProcessingJobMetric, "count number of processing jobs in jobChan")
 	Pusher.AddCounter(ProcessedSuccessJobMetric, "count number of processed jobs successfully")
 	Pusher.AddCounter(ProcessedFailedJobMetric, "count number of failed jobs")
+
 	Pusher.AddCounter(PendingTaskMetric, "count number of pending tasks in queue")
 	Pusher.AddGauge(ProcessingTaskMetric, "count number of processing tasks")
 	Pusher.AddCounter(ProcessedSuccessJobMetric, "count number of success tasks")
@@ -48,6 +50,7 @@ func RunPusher(ctx context.Context) {
 	Pusher.AddCounter(WithdrawalTaskMetric, "count number of ronin’s withdrawal tasks occurred")
 	Pusher.AddCounter(DepositTaskMetric, "count number of ronin’s deposit tasks occurred")
 	Pusher.AddCounter(AckWithdrawalTaskMetric, "count number of ronin acknowledge withdrawal tasks occurred")
+
 	Pusher.AddCounter(KmsSuccessSign, "count number of successful KMS signs")
 	Pusher.AddCounter(KmsNetworkFailure, "count number of failed KMS signs due to network")
 	Pusher.AddCounter(KmsInternalFailure, "count number of KMS server error responses")
