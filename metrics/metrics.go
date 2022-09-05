@@ -59,3 +59,7 @@ func RunPusher(ctx context.Context) {
 
 	go Pusher.Start(ctx)
 }
+
+func init() {
+	Pusher = prometheus.NewPusher()
+}
