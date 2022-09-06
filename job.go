@@ -89,7 +89,9 @@ func (w *Worker) start() {
 		case job := <-w.workerChan:
 			log.Info("processing job", "id", job.GetID(), "nextTry", job.GetNextTry(), "retryCount", job.GetRetryCount(), "type", job.GetType())
 			if job.GetNextTry() == 0 || job.GetNextTry() <= time.Now().Unix() {
+				metrics.Pusher.IncrGauge(metrics.ProcessingJobMetric, 1)
 				w.processJob(job)
+				metrics.Pusher.IncrGauge(metrics.ProcessingJobMetric, -1)
 				continue
 			}
 			// push the job back to mainChan
@@ -107,7 +109,6 @@ func (w *Worker) processJob(job JobHandler) {
 		err error
 		val []byte
 	)
-	defer metrics.Pusher.IncrGauge(metrics.ProcessingJobMetric, -1)
 
 	val, err = job.Process()
 	if err != nil {

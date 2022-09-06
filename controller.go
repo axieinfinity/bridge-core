@@ -578,7 +578,6 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 					continue
 				}
 				metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
-				metrics.Pusher.IncrGauge(metrics.ProcessingJobMetric, 1)
 				c.JobChan <- job
 			}
 		}
