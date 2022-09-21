@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -109,14 +110,19 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 
 	c.cb = gobreaker.NewCircuitBreaker(gobreaker.Settings{
 		Name:     "process pending jobs",
-		Interval: time.Minute,
+		Interval: 30 * time.Second,
+		Timeout:  30 * time.Second,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-			return (counts.Requests > 10 && failureRatio >= 0.8) || counts.ConsecutiveFailures >= 10
+			return (counts.Requests > 10 && failureRatio >= 0.8) || counts.ConsecutiveFailures > 5
 		},
 		OnStateChange: func(name string, from, to gobreaker.State) {
-			if from == gobreaker.StateClosed && to == gobreaker.StateOpen {
-				c.processPendingJobs()
+			log.Info(fmt.Sprintf("State %v changed from %v to %v", name, from, to))
+			if (from == gobreaker.StateClosed && to == gobreaker.StateOpen) || (from == gobreaker.StateHalfOpen && to == gobreaker.StateOpen) {
+				go func() {
+					time.Sleep(time.Second * 30)
+					c.processPendingJobs()
+				}()
 			}
 		},
 	})
@@ -360,7 +366,6 @@ func (c *Controller) Start() error {
 
 func (c *Controller) processPendingJobs() {
 	// load all pending jobs from database
-
 	jobs, err := c.store.GetJobStore().GetPendingJobs()
 	if err != nil {
 		// just log and do nothing.
@@ -387,7 +392,8 @@ func (c *Controller) processPendingJobs() {
 			}
 			return j, nil
 		})
-		if err != nil {
+		if err == gobreaker.ErrOpenState {
+			log.Info("Processing pending jobs failed too many times, break")
 			return
 		}
 
