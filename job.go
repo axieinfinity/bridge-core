@@ -154,9 +154,10 @@ type BaseJob struct {
 	listener         Listener
 
 	fromChainID *big.Int
+	createdAt   time.Time
 }
 
-func NewBaseJob(listener Listener, job *models.Job, transaction Transaction) (*BaseJob, error) {
+func NewBaseJob(listener Listener, job *models.Job, transaction Transaction) (JobHandler, error) {
 	chainId, err := hexutil.DecodeBig(job.FromChainId)
 	if err != nil {
 		return nil, err
@@ -174,6 +175,7 @@ func NewBaseJob(listener Listener, job *models.Job, transaction Transaction) (*B
 		utilsWrapper:     utils.NewUtils(),
 		fromChainID:      chainId,
 		id:               int32(job.ID),
+		createdAt:        time.Unix(job.CreatedAt, 0),
 	}, nil
 }
 
@@ -275,6 +277,7 @@ func (e *BaseJob) Save() error {
 		return err
 	}
 	e.id = int32(job.ID)
+	e.createdAt = time.Unix(job.CreatedAt, 0)
 	return nil
 }
 
@@ -299,4 +302,8 @@ func (e *BaseJob) Update(status string) error {
 
 func (e *BaseJob) SetID(id int32) {
 	e.id = id
+}
+
+func (e *BaseJob) CreatedAt() time.Time {
+	return e.createdAt
 }

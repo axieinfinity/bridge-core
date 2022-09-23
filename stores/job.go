@@ -2,6 +2,7 @@ package stores
 
 import (
 	"fmt"
+
 	"github.com/axieinfinity/bridge-core/models"
 	"gorm.io/gorm"
 )
@@ -28,6 +29,14 @@ func (j *jobStore) GetPendingJobs() ([]*models.Job, error) {
 	err := j.Model(&models.Job{}).Where("status = ?", STATUS_PENDING).
 		Order(fmt.Sprintf("created_at + POWER(2, retry_count) * 10 ASC")).Find(&jobs).Error
 	return jobs, err
+}
+
+func (j *jobStore) GetPendingJobsByTime(upper int64) ([]*models.Job, error) {
+	var jobs []*models.Job
+	if err := j.Model(&models.Job{}).Where("status = ?", STATUS_PENDING).Where("created_at < ?", upper).Find(&jobs).Error; err != nil {
+		return nil, err
+	}
+	return jobs, nil
 }
 
 func (j *jobStore) DeleteJobs(status []string, createdAt uint64) error {

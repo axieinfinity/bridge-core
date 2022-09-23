@@ -81,7 +81,8 @@ type Controller struct {
 	isClosed            atomic.Value
 	hasSubscriptionType map[string]map[int]bool
 
-	cb *gobreaker.CircuitBreaker
+	processingFrame int64
+	cb              *gobreaker.CircuitBreaker
 }
 
 func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
@@ -106,6 +107,7 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 		stop:                make(chan struct{}),
 		isClosed:            atomic.Value{},
 		hasSubscriptionType: make(map[string]map[int]bool),
+		processingFrame:     time.Now().Unix(),
 	}
 
 	c.cb = gobreaker.NewCircuitBreaker(gobreaker.Settings{
@@ -281,6 +283,7 @@ func (c *Controller) Start() error {
 					continue
 				}
 				metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
+				c.processingFrame = job.CreatedAt().Unix()
 				c.JobChan <- job
 			case job := <-c.JobChan:
 				if job == nil {
@@ -610,6 +613,7 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 					continue
 				}
 				metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
+				c.processingFrame = job.CreatedAt().Unix()
 				c.JobChan <- job
 			}
 		}
