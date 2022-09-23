@@ -1,2 +1,7 @@
 .idea/**
 **/*.db
+cmd
+configs
+Makefile
+.env
+.vscode

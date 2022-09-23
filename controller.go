@@ -3,6 +3,7 @@ package internal
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 	"github.com/axieinfinity/bridge-core/metrics"
 	"github.com/axieinfinity/bridge-core/stores"
 	"github.com/axieinfinity/bridge-core/utils"
+	"github.com/sony/gobreaker"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/accounts/abi/bind"
@@ -78,6 +80,8 @@ type Controller struct {
 	stop                chan struct{}
 	isClosed            atomic.Value
 	hasSubscriptionType map[string]map[int]bool
+
+	cb *gobreaker.CircuitBreaker
 }
 
 func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
@@ -103,6 +107,25 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 		isClosed:            atomic.Value{},
 		hasSubscriptionType: make(map[string]map[int]bool),
 	}
+
+	c.cb = gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:     "process pending jobs",
+		Interval: 30 * time.Second,
+		Timeout:  30 * time.Second,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
+			return (counts.Requests > 10 && failureRatio >= 0.8) || counts.ConsecutiveFailures > 5
+		},
+		OnStateChange: func(name string, from, to gobreaker.State) {
+			log.Info(fmt.Sprintf("State %v changed from %v to %v", name, from, to))
+			if (from == gobreaker.StateClosed && to == gobreaker.StateOpen) || (from == gobreaker.StateHalfOpen && to == gobreaker.StateOpen) {
+				go func() {
+					time.Sleep(time.Second * 30)
+					c.processPendingJobs()
+				}()
+			}
+		},
+	})
 
 	if adapters.AppConfig.Prometheus.TurnOn {
 		metrics.RunPusher(ctx)
@@ -361,11 +384,20 @@ func (c *Controller) processPendingJobs() {
 			}
 			continue
 		}
-		j, err := listener.NewJobFromDB(job)
-		if err != nil {
-			log.Error("[Controller] error while init job from db", "err", err, "jobId", job.ID, "type", job.Type)
-			continue
+		ji, err := c.cb.Execute(func() (interface{}, error) {
+			j, err := listener.NewJobFromDB(job)
+			if err != nil {
+				log.Error("[Controller] error while init job from db", "err", err, "jobId", job.ID, "type", job.Type)
+				return nil, err
+			}
+			return j, nil
+		})
+		if err == gobreaker.ErrOpenState {
+			log.Info("Processing pending jobs failed too many times, break")
+			return
 		}
+
+		j, _ := ji.(JobHandler)
 		// add job to jobChan
 		if j != nil {
 			c.JobChan <- j
