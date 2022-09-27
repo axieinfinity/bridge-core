@@ -34,7 +34,7 @@ type JobStore interface {
 	Save(job *models.Job) error
 	Update(job *models.Job) error
 	GetPendingJobs() ([]*models.Job, error)
-	GetPendingJobsByTime(upper int64) ([]*models.Job, error)
+	SearchJobs(req *SearchJobs) ([]*models.Job, error)
 	DeleteJobs([]string, uint64) error
 	Count() int64
 }

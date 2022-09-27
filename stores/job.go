@@ -7,6 +7,13 @@ import (
 	"gorm.io/gorm"
 )
 
+type SearchJobs struct {
+	Status       string
+	Limit        int
+	MaxCreatedAt int64
+	Listeners    []string
+}
+
 type jobStore struct {
 	*gorm.DB
 }
@@ -31,11 +38,29 @@ func (j *jobStore) GetPendingJobs() ([]*models.Job, error) {
 	return jobs, err
 }
 
-func (j *jobStore) GetPendingJobsByTime(upper int64) ([]*models.Job, error) {
+func (j *jobStore) SearchJobs(req *SearchJobs) ([]*models.Job, error) {
 	var jobs []*models.Job
-	if err := j.Model(&models.Job{}).Where("status = ?", STATUS_PENDING).Where("created_at < ?", upper).Find(&jobs).Error; err != nil {
+	q := j.DB.Model(&models.Job{})
+	if req.Status != "" {
+		q = q.Where("status = ?", req.Status)
+	}
+
+	if req.MaxCreatedAt > 0 {
+		q = q.Where("created_at < ?", req.MaxCreatedAt)
+	}
+
+	if req.Limit > 0 {
+		q = q.Limit(req.Limit)
+	}
+
+	if len(req.Listeners) > 0 {
+		q = q.Where("listener in ?", req.Listeners)
+	}
+
+	if err := q.Find(&jobs).Error; err != nil {
 		return nil, err
 	}
+
 	return jobs, nil
 }
 
