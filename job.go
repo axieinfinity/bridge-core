@@ -157,7 +157,7 @@ type BaseJob struct {
 	createdAt   time.Time
 }
 
-func NewBaseJob(listener Listener, job *models.Job, transaction Transaction) (JobHandler, error) {
+func NewBaseJob(listener Listener, job *models.Job, transaction Transaction) (*BaseJob, error) {
 	chainId, err := hexutil.DecodeBig(job.FromChainId)
 	if err != nil {
 		return nil, err
