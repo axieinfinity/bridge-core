@@ -359,10 +359,15 @@ func (c *Controller) Start() error {
 
 func (c *Controller) processPendingJobs() {
 	ticker := time.NewTicker(time.Minute)
-	listeners := []string{"Nothing"}
+	listeners := []string{}
 	for _, v := range c.listeners {
 		listeners = append(listeners, v.GetName())
 	}
+
+	if len(listeners) == 0 {
+		return
+	}
+
 	for {
 		select {
 		case <-ticker.C:
