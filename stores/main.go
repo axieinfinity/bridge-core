@@ -2,12 +2,13 @@ package stores
 
 import (
 	"fmt"
+	"time"
+
 	"github.com/axieinfinity/bridge-core/models"
 	"github.com/ethereum/go-ethereum/log"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
-	"time"
 )
 
 const (
@@ -33,6 +34,7 @@ type JobStore interface {
 	Save(job *models.Job) error
 	Update(job *models.Job) error
 	GetPendingJobs() ([]*models.Job, error)
+	SearchJobs(req *SearchJobs) ([]*models.Job, error)
 	DeleteJobs([]string, uint64) error
 	Count() int64
 }

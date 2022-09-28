@@ -126,6 +126,8 @@ type JobHandler interface {
 
 	Save() error
 	Update(string) error
+
+	CreatedAt() time.Time
 }
 
 type TaskHandler interface {

@@ -3,7 +3,6 @@ package internal
 import (
 	"context"
 	"errors"
-	"fmt"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -81,7 +80,8 @@ type Controller struct {
 	isClosed            atomic.Value
 	hasSubscriptionType map[string]map[int]bool
 
-	cb *gobreaker.CircuitBreaker
+	processingFrame int64
+	cb              *gobreaker.CircuitBreaker
 }
 
 func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
@@ -106,24 +106,16 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 		stop:                make(chan struct{}),
 		isClosed:            atomic.Value{},
 		hasSubscriptionType: make(map[string]map[int]bool),
+		processingFrame:     time.Now().Unix(),
 	}
 
 	c.cb = gobreaker.NewCircuitBreaker(gobreaker.Settings{
 		Name:     "process pending jobs",
-		Interval: 30 * time.Second,
-		Timeout:  30 * time.Second,
+		Interval: 60 * time.Second,
+		Timeout:  60 * time.Second,
 		ReadyToTrip: func(counts gobreaker.Counts) bool {
 			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
 			return (counts.Requests > 10 && failureRatio >= 0.8) || counts.ConsecutiveFailures > 5
-		},
-		OnStateChange: func(name string, from, to gobreaker.State) {
-			log.Info(fmt.Sprintf("State %v changed from %v to %v", name, from, to))
-			if (from == gobreaker.StateClosed && to == gobreaker.StateOpen) || (from == gobreaker.StateHalfOpen && to == gobreaker.StateOpen) {
-				go func() {
-					time.Sleep(time.Second * 30)
-					c.processPendingJobs()
-				}()
-			}
 		},
 	})
 
@@ -281,6 +273,7 @@ func (c *Controller) Start() error {
 					continue
 				}
 				metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
+				c.processingFrame = job.CreatedAt().Unix()
 				c.JobChan <- job
 			case job := <-c.JobChan:
 				if job == nil {
@@ -359,50 +352,70 @@ func (c *Controller) Start() error {
 			}
 		}
 	}()
-	c.processPendingJobs()
+	go c.processPendingJobs()
 	c.startListeners()
 	return nil
 }
 
 func (c *Controller) processPendingJobs() {
-	// load all pending jobs from database
-	jobs, err := c.store.GetJobStore().GetPendingJobs()
-	if err != nil {
-		// just log and do nothing.
-		log.Error("[Controller] error while getting pending jobs from database", "err", err)
+	ticker := time.NewTicker(time.Minute)
+	listeners := []string{}
+	for _, v := range c.listeners {
+		listeners = append(listeners, v.GetName())
 	}
-	for _, job := range jobs {
-		listener, ok := c.listeners[job.Listener]
-		if !ok || listener.IsDisabled() {
-			continue
-		}
-		if job.Type == CallbackHandler && job.Method == "" {
-			// invalid job, update it to failed
-			job.Status = stores.STATUS_FAILED
-			if err = listener.GetStore().GetJobStore().Update(job); err != nil {
-				log.Error("[Controller] error while updating invalid job", "err", err, "id", job.ID)
-			}
-			continue
-		}
-		ji, err := c.cb.Execute(func() (interface{}, error) {
-			j, err := listener.NewJobFromDB(job)
-			if err != nil {
-				log.Error("[Controller] error while init job from db", "err", err, "jobId", job.ID, "type", job.Type)
-				return nil, err
-			}
-			return j, nil
-		})
-		if err == gobreaker.ErrOpenState {
-			log.Info("Processing pending jobs failed too many times, break")
-			return
-		}
 
-		j, _ := ji.(JobHandler)
-		// add job to jobChan
-		if j != nil {
-			c.JobChan <- j
+	if len(listeners) == 0 {
+		return
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			jobs, err := c.store.GetJobStore().SearchJobs(&stores.SearchJobs{
+				Status:       stores.STATUS_PENDING,
+				MaxCreatedAt: c.processingFrame,
+				Listeners:    listeners,
+				Limit:        200,
+			})
+			if err != nil {
+				// just log and do nothing.
+				log.Error("[Controller] error while getting pending jobs from database", "err", err)
+			}
+			for _, job := range jobs {
+				listener, ok := c.listeners[job.Listener]
+				if !ok || listener.IsDisabled() {
+					continue
+				}
+				if job.Type == CallbackHandler && job.Method == "" {
+					// invalid job, update it to failed
+					job.Status = stores.STATUS_FAILED
+					if err = listener.GetStore().GetJobStore().Update(job); err != nil {
+						log.Error("[Controller] error while updating invalid job", "err", err, "id", job.ID)
+					}
+					continue
+				}
+				ji, err := c.cb.Execute(func() (interface{}, error) {
+					j, err := listener.NewJobFromDB(job)
+					if err != nil {
+						log.Error("[Controller] error while init job from db", "err", err, "jobId", job.ID, "type", job.Type)
+						return nil, err
+					}
+					return j, nil
+				})
+				if err == gobreaker.ErrOpenState {
+					log.Info("Processing pending jobs failed too many times, break")
+					break
+				}
+
+				j, _ := ji.(JobHandler)
+				// add job to jobChan
+				if j != nil {
+					c.JobChan <- j
+				}
+			}
 		}
 	}
+
 }
 
 func (c *Controller) startListeners() {
@@ -610,6 +623,7 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 					continue
 				}
 				metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
+				c.processingFrame = job.CreatedAt().Unix()
 				c.JobChan <- job
 			}
 		}

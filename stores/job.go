@@ -2,9 +2,17 @@ package stores
 
 import (
 	"fmt"
+
 	"github.com/axieinfinity/bridge-core/models"
 	"gorm.io/gorm"
 )
+
+type SearchJobs struct {
+	Status       string
+	Limit        int
+	MaxCreatedAt int64
+	Listeners    []string
+}
 
 type jobStore struct {
 	*gorm.DB
@@ -28,6 +36,32 @@ func (j *jobStore) GetPendingJobs() ([]*models.Job, error) {
 	err := j.Model(&models.Job{}).Where("status = ?", STATUS_PENDING).
 		Order(fmt.Sprintf("created_at + POWER(2, retry_count) * 10 ASC")).Find(&jobs).Error
 	return jobs, err
+}
+
+func (j *jobStore) SearchJobs(req *SearchJobs) ([]*models.Job, error) {
+	var jobs []*models.Job
+	q := j.DB.Model(&models.Job{})
+	if req.Status != "" {
+		q = q.Where("status = ?", req.Status)
+	}
+
+	if req.MaxCreatedAt > 0 {
+		q = q.Where("created_at < ?", req.MaxCreatedAt)
+	}
+
+	if req.Limit > 0 {
+		q = q.Limit(req.Limit)
+	}
+
+	if len(req.Listeners) > 0 {
+		q = q.Where("listener in ?", req.Listeners)
+	}
+
+	if err := q.Find(&jobs).Error; err != nil {
+		return nil, err
+	}
+
+	return jobs, nil
 }
 
 func (j *jobStore) DeleteJobs(status []string, createdAt uint64) error {
