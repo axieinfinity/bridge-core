@@ -266,6 +266,9 @@ func (c *Controller) Start() error {
 			case job := <-c.FailedJobChan:
 				c.processFailedJob(job)
 			case job := <-c.PrepareJobChan:
+				if job == nil {
+					continue
+				}
 				// add new job to database before processing
 				if err := c.prepareJob(job); err != nil {
 					log.Error("[Controller] failed on preparing job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
@@ -281,10 +284,9 @@ func (c *Controller) Start() error {
 				}
 				// get 1 workerCh from queue and push job to this channel
 				hash := job.Hash()
-				if _, ok := c.processedJobs.Load(hash); ok {
+				if _, ok := c.processedJobs.LoadOrStore(hash, struct{}{}); ok {
 					continue
 				}
-				c.processedJobs.Store(hash, struct{}{})
 				log.Info("[Controller] jobChan received a job", "jobId", job.GetID(), "nextTry", job.GetNextTry(), "type", job.GetType())
 				workerCh := <-c.Queue
 				workerCh <- job

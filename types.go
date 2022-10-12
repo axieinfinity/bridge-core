@@ -141,19 +141,9 @@ type Config struct {
 	Listeners       map[string]*LsConfig `json:"listeners"`
 	NumberOfWorkers int                  `json:"numberOfWorkers"`
 	DB              *stores.Database     `json:"database"`
-	Cleaner         Cleaner              `json:"cleaner"`
 
 	// this field is used for testing purpose
 	Testing bool
-}
-
-type Cleaner map[string]*CleanerConfig
-
-type CleanerConfig struct {
-	Cron           string `json:"cron"`
-	RemoveAfter    uint64 `json:"removeAfter"`
-	SkipIfLessThan uint64 `json:"SkipIfLessThan"`
-	Description    string `json:"description"`
 }
 
 type LsConfig struct {
