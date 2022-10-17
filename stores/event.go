@@ -18,8 +18,9 @@ func (e *eventStore) Save(event *models.Event) error {
 	return e.Clauses(clause.OnConflict{DoNothing: true}).Create(event).Error
 }
 
-func (e *eventStore) DeleteEvents(createdAt uint64) error {
-	return e.Where("created_at <= ?", createdAt).Delete(&models.Event{}).Error
+func (e *eventStore) DeleteEvents(createdAt uint64) (int64, error) {
+	db := e.Where("created_at <= ?", createdAt).Delete(&models.Event{})
+	return db.RowsAffected, db.Error
 }
 
 func (e *eventStore) Count() int64 {

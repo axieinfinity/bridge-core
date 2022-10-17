@@ -64,8 +64,9 @@ func (j *jobStore) SearchJobs(req *SearchJobs) ([]*models.Job, error) {
 	return jobs, nil
 }
 
-func (j *jobStore) DeleteJobs(status []string, createdAt uint64) error {
-	return j.Where("status in ? AND created_at <= ?", status, createdAt).Delete(&models.Job{}).Error
+func (j *jobStore) DeleteJobs(status []string, createdAt uint64) (int64, error) {
+	db := j.Where("status in ? AND created_at <= ?", status, createdAt).Delete(&models.Job{})
+	return db.RowsAffected, db.Error
 }
 
 func (j *jobStore) Count() int64 {
