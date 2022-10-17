@@ -35,7 +35,7 @@ type JobStore interface {
 	Update(job *models.Job) error
 	GetPendingJobs() ([]*models.Job, error)
 	SearchJobs(req *SearchJobs) ([]*models.Job, error)
-	DeleteJobs([]string, uint64) (int64, error)
+	DeleteJobs([]string, uint64) error
 	Count() int64
 }
 
@@ -46,7 +46,7 @@ type ProcessedBlockStore interface {
 
 type EventStore interface {
 	Save(event *models.Event) error
-	DeleteEvents(uint64) (int64, error)
+	DeleteEvents(uint64) error
 	Count() int64
 }
 
