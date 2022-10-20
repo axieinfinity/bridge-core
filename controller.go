@@ -188,7 +188,8 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 // LoadABIsFromConfig loads all ABIPath and add results to Handler.ABI
 func (c *Controller) LoadABIsFromConfig(lsConfig *LsConfig) (err error) {
 	for _, subscription := range lsConfig.Subscriptions {
-		if subscription.Handler.Contract == "" {
+		// if contract is not defined or abi is not nil then do nothing
+		if subscription.Handler.Contract == "" || subscription.Handler.ABI != nil {
 			continue
 		}
 		// load abi for handler
