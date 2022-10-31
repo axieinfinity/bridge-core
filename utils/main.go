@@ -216,30 +216,26 @@ func (u *utils) FilterLogs(client EthClient, opts *bind.FilterOpts, contractAddr
 	if opts == nil {
 		opts = new(bind.FilterOpts)
 	}
-	var query [][]interface{}
+	var (
+		query  [][]interface{}
+		events []interface{}
+	)
+
 	for contractAbi, methods := range filteredMethods {
-		var events []interface{}
 		for method, _ := range methods {
 			if _, ok := contractAbi.Events[method]; ok {
 				events = append(events, contractAbi.Events[method].ID)
 			}
 		}
-		query = append(query, events)
 	}
+	query = append(query, events)
 	topics, err := abi.MakeTopics(query...)
-	// in order to make `OR` statement, we need to flatten the 2D-slices and include or elements into 1 array
-	flattenTopics := make([][]common.Hash, 1)
-	for _, topic := range topics {
-		if len(topic) > 0 {
-			flattenTopics[0] = append(flattenTopics[0], topic[0])
-		}
-	}
 	if err != nil {
 		return nil, err
 	}
 	config := ethereum.FilterQuery{
 		Addresses: contractAddresses,
-		Topics:    flattenTopics,
+		Topics:    topics,
 		FromBlock: new(big.Int).SetUint64(opts.Start),
 	}
 	if opts.End != nil {
