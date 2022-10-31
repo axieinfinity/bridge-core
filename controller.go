@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"runtime/debug"
 	"strings"
@@ -205,6 +206,7 @@ func (c *Controller) prepareJob(job JobHandler) error {
 	if job == nil {
 		return nil
 	}
+	log.Info("[PrepareJobChan] preparing new job", "job", job.String())
 	// deduplication: get hash from data and type and check if it exists in `processedJobs` or not.
 	hash := c.utilWrapper.RlpHash(struct {
 		Data []byte
@@ -610,13 +612,17 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 		}
 		log.Info("[Controller][processBatchLogs] finish getting logs", "from", opts.Start, "to", *opts.End, "logs", len(logs), "listener", listener.GetName())
 		fromHeight = *opts.End + 1
-		for _, eventLog := range logs {
+		for i, eventLog := range logs {
 			eventId := eventLog.Topics[0]
 			log.Info("[Controller][processBatchLogs] processing log", "topic", eventLog.Topics[0].Hex(), "address", eventLog.Address.Hex(), "transaction", eventLog.TxHash.Hex(), "listener", listener.GetName())
 			if _, ok := eventIds[eventId]; !ok {
 				continue
 			}
-			data := eventLog.Data
+			data, err := json.Marshal(eventLog)
+			if err != nil {
+				log.Error("[Controller] error while marshalling log", "err", err, "transaction", eventLog.TxHash.Hex(), "index", i)
+				continue
+			}
 			name := eventIds[eventId]
 			tx := NewEmptyTransaction(chainId, eventLog.TxHash, eventLog.Data, nil, &eventLog.Address)
 			if job := listener.GetListenHandleJob(name, tx, eventId.Hex(), data); job != nil {
