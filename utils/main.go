@@ -2,6 +2,7 @@ package utils
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/ethereum/go-ethereum/crypto"
@@ -53,6 +54,7 @@ type Utils interface {
 	SignTypedData(typedData core.TypedData, signMethod ISign) (hexutil.Bytes, error)
 	FilterLogs(client EthClient, opts *bind.FilterOpts, contractAddresses []common.Address, filteredMethods map[*abi.ABI]map[string]struct{}) ([]types.Log, error)
 	RlpHash(x interface{}) (h common.Hash)
+	UnpackLog(smcAbi abi.ABI, out interface{}, event string, data []byte) error
 }
 
 type utils struct{}
@@ -214,16 +216,19 @@ func (u *utils) FilterLogs(client EthClient, opts *bind.FilterOpts, contractAddr
 	if opts == nil {
 		opts = new(bind.FilterOpts)
 	}
-	var query [][]interface{}
+	var (
+		query  [][]interface{}
+		events []interface{}
+	)
+
 	for contractAbi, methods := range filteredMethods {
-		var events []interface{}
 		for method, _ := range methods {
 			if _, ok := contractAbi.Events[method]; ok {
 				events = append(events, contractAbi.Events[method].ID)
 			}
 		}
-		query = append(query, events)
 	}
+	query = append(query, events)
 	topics, err := abi.MakeTopics(query...)
 	if err != nil {
 		return nil, err
@@ -246,4 +251,26 @@ func (u *utils) RlpHash(x interface{}) (h common.Hash) {
 	rlp.Encode(sha, x)
 	sha.Read(h[:])
 	return h
+}
+
+func (u *utils) UnpackLog(smcAbi abi.ABI, out interface{}, event string, data []byte) error {
+	var log types.Log
+	if err := json.Unmarshal(data, &log); err != nil {
+		return err
+	}
+	if log.Topics[0] != smcAbi.Events[event].ID {
+		return fmt.Errorf("event signature mismatch")
+	}
+	if len(log.Data) > 0 {
+		if err := smcAbi.UnpackIntoInterface(out, event, log.Data); err != nil {
+			return err
+		}
+	}
+	var indexed abi.Arguments
+	for _, arg := range smcAbi.Events[event].Inputs {
+		if arg.Indexed {
+			indexed = append(indexed, arg)
+		}
+	}
+	return abi.ParseTopics(out, indexed, log.Topics[1:])
 }

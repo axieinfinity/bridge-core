@@ -234,6 +234,10 @@ func (e *BaseJob) Process() ([]byte, error) {
 	return nil, nil
 }
 
+func (e *BaseJob) String() string {
+	return fmt.Sprintf("{Type:%v, Subscription:%v, RetryCount: %v}", e.GetType(), e.GetSubscriptionName(), e.GetRetryCount())
+}
+
 func (e *BaseJob) Hash() common.Hash {
 	return common.BytesToHash([]byte(fmt.Sprintf("j-%d-%d-%d", e.id, e.retryCount, e.nextTry)))
 }

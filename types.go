@@ -128,6 +128,7 @@ type JobHandler interface {
 	Update(string) error
 
 	CreatedAt() time.Time
+	String() string
 }
 
 type TaskHandler interface {
