@@ -279,7 +279,6 @@ func (c *Controller) Start() error {
 					continue
 				}
 				metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
-				c.processingFrame = job.CreatedAt().Unix()
 				c.JobChan <- job
 			case job := <-c.JobChan:
 				if job == nil {
@@ -385,6 +384,9 @@ func (c *Controller) processPendingJobs() {
 			if err != nil {
 				// just log and do nothing.
 				log.Error("[Controller] error while getting pending jobs from database", "err", err)
+			}
+			if len(jobs) == 0 {
+				return
 			}
 			for _, job := range jobs {
 				listener, ok := c.listeners[job.Listener]
@@ -632,7 +634,6 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 					continue
 				}
 				metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
-				c.processingFrame = job.CreatedAt().Unix()
 				c.JobChan <- job
 			}
 		}
