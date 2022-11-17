@@ -151,6 +151,7 @@ type LsConfig struct {
 	ChainId        string        `json:"chainId"`
 	Name           string        `json:"-"`
 	RpcUrl         string        `json:"rpcUrl"`
+	RpcUrls        *RpcUrls      `json:"rpcUrls"`
 	LoadInterval   time.Duration `json:"blockTime"`
 	SafeBlockRange uint64        `json:"safeBlockRange"`
 	FromHeight     uint64        `json:"fromHeight"`
@@ -173,6 +174,11 @@ type LsConfig struct {
 	// MaxProcessingTasks is used to specify max processing tasks allowed while processing tasks
 	// if number of tasks reaches this number, it waits until this number decrease
 	MaxProcessingTasks int `json:"maxProcessingTasks"`
+}
+
+type RpcUrls struct {
+	Ethereum *string `json:"ethereum,omitempty"`
+	Ronin    *string `json:"ronin,omitempty"`
 }
 
 type Secret struct {
