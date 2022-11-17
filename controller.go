@@ -592,7 +592,7 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 	}
 	retry := 0
 	batchSize := uint64(listener.Config().GetLogsBatchSize)
-	for fromHeight <= toHeight {
+	for fromHeight < toHeight {
 		if retry == 10 {
 			break
 		}
@@ -603,8 +603,11 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 		if fromHeight+batchSize < toHeight {
 			to := fromHeight + batchSize
 			opts.End = &to
+		} else if fromHeight == toHeight-1 {
+			opts.End = &fromHeight
 		} else {
-			opts.End = &toHeight
+			to := toHeight - 1
+			opts.End = &to
 		}
 		logs, err := c.utilWrapper.FilterLogs(listener.GetEthClient(), opts, contractAddresses, filteredMethods)
 		if err != nil {
