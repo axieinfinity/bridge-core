@@ -417,7 +417,7 @@ func (c *Controller) processPendingJobs() {
 				j, _ := ji.(JobHandler)
 				// add job to jobChan
 				if j != nil {
-					c.JobChan <- j
+					c.PrepareJobChan <- j
 				}
 			}
 		}
