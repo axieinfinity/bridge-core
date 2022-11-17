@@ -279,7 +279,6 @@ func (c *Controller) Start() error {
 					continue
 				}
 				metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
-				c.processingFrame = job.CreatedAt().Unix()
 				c.JobChan <- job
 			case job := <-c.JobChan:
 				if job == nil {
@@ -386,6 +385,9 @@ func (c *Controller) processPendingJobs() {
 				// just log and do nothing.
 				log.Error("[Controller] error while getting pending jobs from database", "err", err)
 			}
+			if len(jobs) == 0 {
+				return
+			}
 			for _, job := range jobs {
 				listener, ok := c.listeners[job.Listener]
 				if !ok || listener.IsDisabled() {
@@ -415,7 +417,7 @@ func (c *Controller) processPendingJobs() {
 				j, _ := ji.(JobHandler)
 				// add job to jobChan
 				if j != nil {
-					c.JobChan <- j
+					c.PrepareJobChan <- j
 				}
 			}
 		}
@@ -590,7 +592,7 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 	}
 	retry := 0
 	batchSize := uint64(listener.Config().GetLogsBatchSize)
-	for fromHeight <= toHeight {
+	for fromHeight < toHeight {
 		if retry == 10 {
 			break
 		}
@@ -601,8 +603,11 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 		if fromHeight+batchSize < toHeight {
 			to := fromHeight + batchSize
 			opts.End = &to
+		} else if fromHeight == toHeight-1 {
+			opts.End = &fromHeight
 		} else {
-			opts.End = &toHeight
+			to := toHeight - 1
+			opts.End = &to
 		}
 		logs, err := c.utilWrapper.FilterLogs(listener.GetEthClient(), opts, contractAddresses, filteredMethods)
 		if err != nil {
@@ -632,7 +637,6 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 					continue
 				}
 				metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
-				c.processingFrame = job.CreatedAt().Unix()
 				c.JobChan <- job
 			}
 		}
