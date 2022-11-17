@@ -11,7 +11,7 @@ git clone https://github.com/axieinfinity/ronin.git
 Create a `go` application
 ```
 mkdir app
-cd
+cd app
 go mod init app
 ```
 
@@ -51,11 +51,46 @@ func main() {
 
 ### Implementation
 First, we need to provide an implementation of `Listener` interface. Then, we add methods determining event callbacks to the implementation struct. Type of callback method
-```
+```go
 type Callback func(fromChainId *big.Int, tx bridgeCore.Transaction, data []byte) error
 ```
 
-Second, we need a configuration:
+For delegating a callback on event, we implement callback methods following the above type
+```go
+func (l *ConreteListener) WithdrewCallback(fromChainId *big.Int, tx internal.Transaction, data []byte) error {
+	// implementation here
+}
+```
+
+Next, we create an instance of controller. Before creating, we need to call `AddListener` method which receives `ChainName` and an initalizing function returning an instance of `Listener`.
+
+Type of init function:
+```go
+type Init func(ctx context.Context, lsConfig *internal.LsConfig, store stores.MainStore, helpers utils.Utils) internal.Listener
+```
+
+```go
+func CreateController(cfg *internal.Config, db *gorm.DB) *internal.Controller {
+	internal.AddListener("Ethereum", InitEthereum)
+	internal.AddListener("Ronin", InitRonin)
+	controller, err := internal.New(cfg, db, nil)
+	if err != nil {
+		panic(err)
+	}
+	return controller
+}
+
+func InitEthereum(ctx context.Context, lsConfig *internal.LsConfig, store stores.MainStore, helpers utils.Utils) internal.Listener {
+	// implementation here
+}
+
+func InitRonin(ctx context.Context, lsConfig *internal.LsConfig, store stores.MainStore, helpers utils.Utils) internal.Listener {
+	// implementation here
+}
+```
+
+### Configuration
+we need a configuration:
 ```go
 	config := &internal.Config{
 		Listeners: map[string]*internal.LsConfig{
@@ -99,7 +134,7 @@ Second, we need a configuration:
 	}
 ```
 
-This configuration includes chain id, a map of subscription provides information about event listener and callback, these information are provided inside `Handler` and `Callbacks` perspectively.
+Config includes a map representing the configuration on this chain. This configuration includes chain id, a map of subscription provides information about event listener and callback, these information are provided inside `Handler` and `Callbacks` perspectively.
 
 ## Examples
-See `examples` for sample use cases.
+See [Example](examples/) for sample use cases.
