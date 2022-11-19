@@ -363,7 +363,7 @@ func (c *Controller) Start() error {
 
 func (c *Controller) processPendingJobs() {
 	ticker := time.NewTicker(time.Minute)
-	listeners := []string{}
+	var listeners []string
 	for _, v := range c.listeners {
 		listeners = append(listeners, v.GetName())
 	}
@@ -640,7 +640,7 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 				c.JobChan <- job
 			}
 		}
-		block, _ := listener.GetBlock(*opts.End)
+		block, _ := listener.GetBlock(fromHeight)
 		listener.UpdateCurrentBlock(block)
 	}
 	return fromHeight
