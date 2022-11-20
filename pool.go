@@ -168,7 +168,9 @@ func (p *Pool) Start(closeFunc func()) {
 			}
 
 			// call close function firstly
-			closeFunc()
+			if closeFunc != nil {
+				closeFunc()
+			}
 
 			// loop through prepare job chan to store all jobs to db
 			for {
