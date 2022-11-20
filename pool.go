@@ -7,7 +7,6 @@ import (
 	"github.com/axieinfinity/bridge-core/stores"
 	"github.com/axieinfinity/bridge-core/utils"
 	"github.com/ethereum/go-ethereum/log"
-	"github.com/sony/gobreaker"
 	"gorm.io/gorm"
 	"runtime/debug"
 	"sync"
@@ -47,11 +46,7 @@ type Pool struct {
 	store    stores.MainStore
 	stop     chan struct{}
 	isClosed atomic.Value
-
-	processingFrame int64
-	cb              *gobreaker.CircuitBreaker
-
-	utils utils.Utils
+	utils    utils.Utils
 }
 
 func NewPool(ctx context.Context, cfg *Config, db *gorm.DB, workers []Worker) *Pool {
@@ -59,16 +54,15 @@ func NewPool(ctx context.Context, cfg *Config, db *gorm.DB, workers []Worker) *P
 		cfg.NumberOfWorkers = defaultWorkers
 	}
 	pool := &Pool{
-		ctx:             ctx,
-		cfg:             cfg,
-		MaxRetry:        100,
-		BackOff:         5,
-		MaxQueueSize:    defaultMaxQueueSize,
-		store:           stores.NewMainStore(db),
-		stop:            make(chan struct{}),
-		isClosed:        atomic.Value{},
-		processingFrame: time.Now().Unix(),
-		utils:           utils.NewUtils(),
+		ctx:          ctx,
+		cfg:          cfg,
+		MaxRetry:     100,
+		BackOff:      5,
+		MaxQueueSize: defaultMaxQueueSize,
+		store:        stores.NewMainStore(db),
+		stop:         make(chan struct{}),
+		isClosed:     atomic.Value{},
+		utils:        utils.NewUtils(),
 	}
 
 	pool.isClosed.Store(false)
