@@ -1,4 +1,4 @@
-package internal
+package bridge_core
 
 import (
 	"context"
