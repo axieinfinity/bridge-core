@@ -46,10 +46,8 @@ type Controller struct {
 	HandlerABIs map[string]*abi.ABI
 	utilWrapper utils.Utils
 
-	Pool    *Pool
-	Workers []Worker
-
-	cfg *Config
+	Pool *Pool
+	cfg  *Config
 
 	store               stores.MainStore
 	hasSubscriptionType map[string]map[int]bool
