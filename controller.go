@@ -117,6 +117,9 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 		// set prepare job chan to listener
 		l.SetPrepareJobChan(c.Pool.PrepareJobChan)
 
+		// set listeners to listeners
+		l.AddListeners(c.listeners)
+
 		// add listener to controller
 		c.listeners[name] = l
 		c.hasSubscriptionType[name] = make(map[int]bool)

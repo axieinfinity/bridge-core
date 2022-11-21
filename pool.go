@@ -160,13 +160,7 @@ func (p *Pool) Start(closeFunc func()) {
 			workerCh := <-p.Queue
 			workerCh <- job
 		case <-p.ctx.Done():
-			// prevent ctx.Done is called multiple times among routines.
-			if p.isClosed.Load().(bool) {
-				return
-			} else {
-				p.isClosed.Store(true)
-			}
-
+			p.isClosed.Store(true)
 			// call close function firstly
 			if closeFunc != nil {
 				closeFunc()
@@ -221,7 +215,7 @@ func (p *Pool) Start(closeFunc func()) {
 
 			// send signal to stop the program
 			p.stop <- struct{}{}
-			break
+			return
 		}
 	}
 }
