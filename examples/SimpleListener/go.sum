@@ -48,6 +48,8 @@ github.com/axieinfinity/bridge-contracts v0.0.0-20220731110242-d273b578b657 h1:Z
 github.com/axieinfinity/bridge-contracts v0.0.0-20220731110242-d273b578b657/go.mod h1:/1xWUM5AIZGYgaFxl9ojlw3tCgeWF4SDg8qrzx5YHwk=
 github.com/axieinfinity/bridge-core v0.1.2-0.20221031095024-7319520259bf h1:86AiUhF3ZQ+6qpIdD3KZSjD3Ooo9xYPexFkoQVehY+U=
 github.com/axieinfinity/bridge-core v0.1.2-0.20221031095024-7319520259bf/go.mod h1:rsKGb45uQio1Rpqsc7grYyZEBn/fEPFyamJ55pQz1Fk=
+github.com/axieinfinity/bridge-core v0.1.2-0.20221122063231-b5205fdcec6b h1:La0N43+KV7ywZJKpa7l3utOip70npvAzH3bX/uN62WU=
+github.com/axieinfinity/bridge-core v0.1.2-0.20221122063231-b5205fdcec6b/go.mod h1:rsKGb45uQio1Rpqsc7grYyZEBn/fEPFyamJ55pQz1Fk=
 github.com/axieinfinity/bridge-migrations v0.0.0-20221108093216-ed8a0671694a h1:Y6+j87FaUIGjw2lJz0XTaVj6gCkZmG1MNvbqPqzfmb8=
 github.com/axieinfinity/bridge-migrations v0.0.0-20221108093216-ed8a0671694a/go.mod h1:867OEbEWDp965PZ44feJElRZz4RuNDceEbjCjWBbxe0=
 github.com/axieinfinity/ronin-kms-client v0.0.0-20220805072849-960e04981b70 h1:4MMSxt0Ce9cCN/XB+ESc/JllU1/jklFiIsWG4gq2y+g=

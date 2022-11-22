@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	internal "github.com/axieinfinity/bridge-core"
+	bridge_core "github.com/axieinfinity/bridge-core"
 	"github.com/axieinfinity/bridge-core/stores"
 	"github.com/axieinfinity/bridge-core/utils"
 	migration "github.com/axieinfinity/bridge-migrations"
@@ -16,17 +16,17 @@ import (
 	"gorm.io/gorm"
 )
 
-func NewBridgeController(cfg *internal.Config, db *gorm.DB, helpers utils.Utils) (*internal.Controller, error) {
-	internal.AddListener("Ethereum", InitDeposited)
-	internal.AddListener("Ronin", InitWithdraw)
-	controller, err := internal.New(cfg, db, helpers)
+func NewBridgeController(cfg *bridge_core.Config, db *gorm.DB, helpers utils.Utils) (*bridge_core.Controller, error) {
+	bridge_core.AddListener("Ethereum", InitDeposited)
+	bridge_core.AddListener("Ronin", InitWithdraw)
+	controller, err := bridge_core.New(cfg, db, helpers)
 	if err != nil {
 		return nil, err
 	}
 	return controller, nil
 }
 
-func InitDeposited(ctx context.Context, lsConfig *internal.LsConfig, store stores.MainStore, helpers utils.Utils) internal.Listener {
+func InitDeposited(ctx context.Context, lsConfig *bridge_core.LsConfig, store stores.MainStore, helpers utils.Utils) bridge_core.Listener {
 	ethListener, err := NewEthereumListener(ctx, lsConfig, helpers, store)
 	if err != nil {
 		log.Error("[EthereumListener]Error while init new ethereum listener", "err", err.Error())
@@ -36,7 +36,7 @@ func InitDeposited(ctx context.Context, lsConfig *internal.LsConfig, store store
 	return ethListener
 }
 
-func InitWithdraw(ctx context.Context, lsConfig *internal.LsConfig, store stores.MainStore, helpers utils.Utils) internal.Listener {
+func InitWithdraw(ctx context.Context, lsConfig *bridge_core.LsConfig, store stores.MainStore, helpers utils.Utils) bridge_core.Listener {
 	ethListener, err := NewEthereumListener(ctx, lsConfig, helpers, store)
 	if err != nil {
 		log.Error("[EthereumListener]Error while init new ethereum listener", "err", err.Error())
@@ -47,20 +47,20 @@ func InitWithdraw(ctx context.Context, lsConfig *internal.LsConfig, store stores
 }
 
 func main() {
-	config := &internal.Config{
-		Listeners: map[string]*internal.LsConfig{
+	config := &bridge_core.Config{
+		Listeners: map[string]*bridge_core.LsConfig{
 			"Ethereum": {
 				ChainId: "0x03",
 				Name:    "Ethereum",
 				RpcUrl:  "url",
-				Subscriptions: map[string]*internal.Subscribe{
+				Subscriptions: map[string]*bridge_core.Subscribe{
 					"WithdrewSubscription": {
 						To:   "0x4E4D9B21B157CCD52b978C3a3BCd1dc5eBAE7167",
 						Type: 1, // 0 for listening, 1 for callback
 						CallBacks: map[string]string{
 							"Ethereum": "WithdrewCallback", // Key: Value is Chain name: method name
 						},
-						Handler: &internal.Handler{
+						Handler: &bridge_core.Handler{
 							Contract: "EthereumGateway", // contract name
 							Name:     "Withdrew",        // Event name
 						},
@@ -71,14 +71,14 @@ func main() {
 				ChainId: "0x7e5",
 				Name:    "Ronin",
 				RpcUrl:  "url",
-				Subscriptions: map[string]*internal.Subscribe{
+				Subscriptions: map[string]*bridge_core.Subscribe{
 					"DepositedCallback": {
 						To:   "0xA8D61A5427a778be28Bd9bb5990956b33385c738",
 						Type: 1, // 0 for listening, 1 for callback
 						CallBacks: map[string]string{
 							"Ronin": "DepositedCallback", // Key: Value is Chain name: method name
 						},
-						Handler: &internal.Handler{
+						Handler: &bridge_core.Handler{
 							Contract: "RoninGateway", // contract name
 							Name:     "Deposited",    // Event name
 						},

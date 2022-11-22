@@ -7,7 +7,7 @@ replace github.com/ethereum/go-ethereum => ../ronin
 require (
 	github.com/VictoriaMetrics/fastcache v1.12.0 // indirect
 	github.com/axieinfinity/bridge-contracts v0.0.0-20220731110242-d273b578b657 // indirect
-	github.com/axieinfinity/bridge-core v0.1.2-0.20221031095024-7319520259bf // indirect
+	github.com/axieinfinity/bridge-core v0.1.2-0.20221122063231-b5205fdcec6b // indirect
 	github.com/axieinfinity/bridge-migrations v0.0.0-20221108093216-ed8a0671694a // indirect
 	github.com/axieinfinity/ronin-kms-client v0.0.0-20220805072849-960e04981b70 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect

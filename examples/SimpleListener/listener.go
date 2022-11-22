@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	internal "github.com/axieinfinity/bridge-core"
+	bridge_core "github.com/axieinfinity/bridge-core"
 	goeth "github.com/ethereum/go-ethereum"
 	ethtypes "github.com/ethereum/go-ethereum/core/types"
 
@@ -41,7 +41,7 @@ type EthereumListener struct {
 	ctx       context.Context
 	cancelCtx context.CancelFunc
 
-	config *internal.LsConfig
+	config *bridge_core.LsConfig
 
 	chainId *big.Int
 
@@ -56,11 +56,13 @@ type EthereumListener struct {
 	relayerSign    utils.ISign
 	store          stores.MainStore
 
-	prepareJobChan chan internal.JobHandler
-	tasks          []internal.TaskHandler
+	prepareJobChan chan bridge_core.JobHandler
+	tasks          []bridge_core.TaskHandler
+
+	listeners map[string]bridge_core.Listener
 }
 
-func NewEthereumListener(ctx context.Context, cfg *internal.LsConfig, helpers utils.Utils, store stores.MainStore) (*EthereumListener, error) {
+func NewEthereumListener(ctx context.Context, cfg *bridge_core.LsConfig, helpers utils.Utils, store stores.MainStore) (*EthereumListener, error) {
 	newCtx, cancelFunc := context.WithCancel(ctx)
 	ethListener := &EthereumListener{
 		name:           cfg.Name,
@@ -74,7 +76,7 @@ func NewEthereumListener(ctx context.Context, cfg *internal.LsConfig, helpers ut
 		config:         cfg,
 		chainId:        hexutil.MustDecodeBig(cfg.ChainId),
 		safeBlockRange: cfg.SafeBlockRange,
-		tasks:          make([]internal.TaskHandler, 0),
+		tasks:          make([]bridge_core.TaskHandler, 0),
 	}
 	if helpers != nil {
 		ethListener.utilsWrapper = helpers
@@ -107,7 +109,7 @@ func (e *EthereumListener) GetStore() stores.MainStore {
 	return e.store
 }
 
-func (e *EthereumListener) Config() *internal.LsConfig {
+func (e *EthereumListener) Config() *bridge_core.LsConfig {
 	return e.config
 }
 
@@ -141,22 +143,22 @@ func (e *EthereumListener) GetInitHeight() uint64 {
 	return e.fromHeight
 }
 
-func (e *EthereumListener) GetTask(index int) internal.TaskHandler {
+func (e *EthereumListener) GetTask(index int) bridge_core.TaskHandler {
 	return e.tasks[index]
 }
 
-func (e *EthereumListener) GetTasks() []internal.TaskHandler {
+func (e *EthereumListener) GetTasks() []bridge_core.TaskHandler {
 	return e.tasks
 }
 
-func (e *EthereumListener) AddTask(task internal.TaskHandler) {
+func (e *EthereumListener) AddTask(task bridge_core.TaskHandler) {
 	e.tasks = append(e.tasks, task)
 }
 
-func (e *EthereumListener) GetCurrentBlock() internal.Block {
-	if _, ok := e.currentBlock.Load().(internal.Block); !ok {
+func (e *EthereumListener) GetCurrentBlock() bridge_core.Block {
+	if _, ok := e.currentBlock.Load().(bridge_core.Block); !ok {
 		var (
-			block internal.Block
+			block bridge_core.Block
 			err   error
 		)
 		block, err = e.GetProcessedBlock()
@@ -180,14 +182,14 @@ func (e *EthereumListener) GetCurrentBlock() internal.Block {
 		e.currentBlock.Store(block)
 		return block
 	}
-	return e.currentBlock.Load().(internal.Block)
+	return e.currentBlock.Load().(bridge_core.Block)
 }
 
 func (e *EthereumListener) IsUpTodate() bool {
 	return true
 }
 
-func (e *EthereumListener) GetProcessedBlock() (internal.Block, error) {
+func (e *EthereumListener) GetProcessedBlock() (bridge_core.Block, error) {
 	chainId, err := e.GetChainID()
 	if err != nil {
 		log.Error(fmt.Sprintf("[%sListener][GetLatestBlock] error while getting chainId", e.GetName()), "err", err.Error())
@@ -206,7 +208,7 @@ func (e *EthereumListener) GetProcessedBlock() (internal.Block, error) {
 	return NewEthBlock(e.client, chainId, block, false)
 }
 
-func (e *EthereumListener) GetLatestBlock() (internal.Block, error) {
+func (e *EthereumListener) GetLatestBlock() (bridge_core.Block, error) {
 	block, err := e.client.BlockByNumber(e.ctx, nil)
 	if err != nil {
 		return nil, err
@@ -229,11 +231,11 @@ func (e *EthereumListener) Context() context.Context {
 	return e.ctx
 }
 
-func (e *EthereumListener) GetSubscriptions() map[string]*internal.Subscribe {
+func (e *EthereumListener) GetSubscriptions() map[string]*bridge_core.Subscribe {
 	return e.config.Subscriptions
 }
 
-func (e *EthereumListener) UpdateCurrentBlock(block internal.Block) error {
+func (e *EthereumListener) UpdateCurrentBlock(block bridge_core.Block) error {
 	if block != nil && e.GetCurrentBlock().GetHeight() < block.GetHeight() {
 		log.Info(fmt.Sprintf("[%sListener] UpdateCurrentBlock", e.name), "block", block.GetHeight())
 		e.currentBlock.Store(block)
@@ -255,11 +257,11 @@ func (e *EthereumListener) SaveCurrentBlockToDB() error {
 	return nil
 }
 
-func (e *EthereumListener) SaveTransactionsToDB(txs []internal.Transaction) error {
+func (e *EthereumListener) SaveTransactionsToDB(txs []bridge_core.Transaction) error {
 	return nil
 }
 
-func (e *EthereumListener) SetPrepareJobChan(jobChan chan internal.JobHandler) {
+func (e *EthereumListener) SetPrepareJobChan(jobChan chan bridge_core.JobHandler) {
 	e.prepareJobChan = jobChan
 }
 
@@ -267,14 +269,14 @@ func (e *EthereumListener) GetEthClient() utils.EthClient {
 	return e.client
 }
 
-func (e *EthereumListener) GetListenHandleJob(subscriptionName string, tx internal.Transaction, eventId string, data []byte) internal.JobHandler {
+func (e *EthereumListener) GetListenHandleJob(subscriptionName string, tx bridge_core.Transaction, eventId string, data []byte) bridge_core.JobHandler {
 	// validate if data contains subscribed name
 	subscription, ok := e.GetSubscriptions()[subscriptionName]
 	if !ok {
 		return nil
 	}
 	handlerName := subscription.Handler.Name
-	if subscription.Type == internal.TxEvent {
+	if subscription.Type == bridge_core.TxEvent {
 		method, ok := subscription.Handler.ABI.Methods[handlerName]
 		if !ok {
 			return nil
@@ -282,7 +284,7 @@ func (e *EthereumListener) GetListenHandleJob(subscriptionName string, tx intern
 		if method.RawName != common.Bytes2Hex(data[0:4]) {
 			return nil
 		}
-	} else if subscription.Type == internal.LogEvent {
+	} else if subscription.Type == bridge_core.LogEvent {
 		event, ok := subscription.Handler.ABI.Events[handlerName]
 		if !ok {
 			return nil
@@ -293,10 +295,10 @@ func (e *EthereumListener) GetListenHandleJob(subscriptionName string, tx intern
 	} else {
 		return nil
 	}
-	return NewEthListenJob(internal.ListenHandler, e, subscriptionName, tx, data)
+	return NewEthListenJob(bridge_core.ListenHandler, e, subscriptionName, tx, data)
 }
 
-func (e *EthereumListener) SendCallbackJobs(listeners map[string]internal.Listener, subscriptionName string, tx internal.Transaction, inputData []byte) {
+func (e *EthereumListener) SendCallbackJobs(listeners map[string]bridge_core.Listener, subscriptionName string, tx bridge_core.Transaction, inputData []byte) {
 	log.Info(fmt.Sprintf("[%sListener][SendCallbackJobs] Start", e.GetName()), "subscriptionName", subscriptionName, "listeners", len(listeners), "fromTx", tx.GetHash().Hex())
 	chainId, err := e.GetChainID()
 	if err != nil {
@@ -318,7 +320,7 @@ func (e *EthereumListener) SendCallbackJobs(listeners map[string]internal.Listen
 	}
 }
 
-func (e *EthereumListener) GetBlock(height uint64) (internal.Block, error) {
+func (e *EthereumListener) GetBlock(height uint64) (bridge_core.Block, error) {
 	block, err := e.client.BlockByNumber(e.ctx, big.NewInt(int64(height)))
 	if err != nil {
 		return nil, err
@@ -326,7 +328,7 @@ func (e *EthereumListener) GetBlock(height uint64) (internal.Block, error) {
 	return NewEthBlock(e.client, e.chainId, block, false)
 }
 
-func (e *EthereumListener) GetBlockWithLogs(height uint64) (internal.Block, error) {
+func (e *EthereumListener) GetBlockWithLogs(height uint64) (bridge_core.Block, error) {
 	block, err := e.client.BlockByNumber(e.ctx, big.NewInt(int64(height)))
 	if err != nil {
 		return nil, err
@@ -338,7 +340,7 @@ func (e *EthereumListener) GetReceipt(txHash common.Hash) (*ethtypes.Receipt, er
 	return e.client.TransactionReceipt(e.ctx, txHash)
 }
 
-func (e *EthereumListener) NewJobFromDB(job *models.Job) (internal.JobHandler, error) {
+func (e *EthereumListener) NewJobFromDB(job *models.Job) (bridge_core.JobHandler, error) {
 	return newJobFromDB(e, job)
 }
 
@@ -355,10 +357,18 @@ func (e *EthereumListener) GetRelayerSign() utils.ISign {
 	return e.relayerSign
 }
 
+func (e *EthereumListener) AddListeners(listeners map[string]bridge_core.Listener) {
+	e.listeners = listeners
+}
+
+func (e *EthereumListener) GetListener(name string) bridge_core.Listener {
+	return e.listeners[name]
+}
+
 type EthBlock struct {
 	block *ethtypes.Block
-	txs   []internal.Transaction
-	logs  []internal.Log
+	txs   []bridge_core.Transaction
+	logs  []bridge_core.Log
 }
 
 func NewEthBlock(client utils.EthClient, chainId *big.Int, block *ethtypes.Block, getLogs bool) (*EthBlock, error) {
@@ -395,11 +405,11 @@ func NewEthBlock(client utils.EthClient, chainId *big.Int, block *ethtypes.Block
 func (b *EthBlock) GetHash() common.Hash { return b.block.Hash() }
 func (b *EthBlock) GetHeight() uint64    { return b.block.NumberU64() }
 
-func (b *EthBlock) GetTransactions() []internal.Transaction {
+func (b *EthBlock) GetTransactions() []bridge_core.Transaction {
 	return b.txs
 }
 
-func (b *EthBlock) GetLogs() []internal.Log {
+func (b *EthBlock) GetLogs() []bridge_core.Log {
 	return b.logs
 }
 
@@ -531,10 +541,10 @@ func (e *EthLog) GetTransactionHash() string {
 }
 
 type EthListenJob struct {
-	*internal.BaseJob
+	*bridge_core.BaseJob
 }
 
-func NewEthListenJob(jobType int, listener internal.Listener, subscriptionName string, tx internal.Transaction, data []byte) internal.JobHandler {
+func NewEthListenJob(jobType int, listener bridge_core.Listener, subscriptionName string, tx bridge_core.Transaction, data []byte) bridge_core.JobHandler {
 	chainId, err := listener.GetChainID()
 	if err != nil {
 		return nil
@@ -547,7 +557,7 @@ func NewEthListenJob(jobType int, listener internal.Listener, subscriptionName s
 		Data:             common.Bytes2Hex(data),
 		FromChainId:      hexutil.EncodeBig(chainId),
 	}
-	baseJob, err := internal.NewBaseJob(listener, job, tx)
+	baseJob, err := bridge_core.NewBaseJob(listener, job, tx)
 	if err != nil {
 		return nil
 	}
@@ -557,20 +567,20 @@ func NewEthListenJob(jobType int, listener internal.Listener, subscriptionName s
 }
 
 type EthCallbackJob struct {
-	*internal.BaseJob
+	*bridge_core.BaseJob
 	method    string
 	createdAt time.Time
 }
 
-func NewEthCallbackJob(listener internal.Listener, method string, tx internal.Transaction, data []byte, fromChainID *big.Int, helpers utils.Utils) *EthCallbackJob {
+func NewEthCallbackJob(listener bridge_core.Listener, method string, tx bridge_core.Transaction, data []byte, fromChainID *big.Int, helpers utils.Utils) *EthCallbackJob {
 	job := &models.Job{
 		ID:          0,
-		Type:        internal.CallbackHandler,
+		Type:        bridge_core.CallbackHandler,
 		RetryCount:  0,
 		Data:        common.Bytes2Hex(data),
 		FromChainId: hexutil.EncodeBig(fromChainID),
 	}
-	baseJob, err := internal.NewBaseJob(listener, job, tx)
+	baseJob, err := bridge_core.NewBaseJob(listener, job, tx)
 	if err != nil {
 		return nil
 	}
@@ -651,7 +661,7 @@ func executeTemplate(ts string, data map[string]interface{}) (string, error) {
 	return sb.String(), nil
 }
 
-func newJobFromDB(listener internal.Listener, job *models.Job) (internal.JobHandler, error) {
+func newJobFromDB(listener bridge_core.Listener, job *models.Job) (bridge_core.JobHandler, error) {
 	chainId, err := hexutil.DecodeBig(job.FromChainId)
 	if err != nil {
 		return nil, err
@@ -665,16 +675,16 @@ func newJobFromDB(listener internal.Listener, job *models.Job) (internal.JobHand
 	if err != nil {
 		return nil, err
 	}
-	baseJob, err := internal.NewBaseJob(listener, job, transaction)
+	baseJob, err := bridge_core.NewBaseJob(listener, job, transaction)
 	if err != nil {
 		return nil, err
 	}
 	switch job.Type {
-	case internal.ListenHandler:
+	case bridge_core.ListenHandler:
 		return &EthListenJob{
 			BaseJob: baseJob,
 		}, nil
-	case internal.CallbackHandler:
+	case bridge_core.CallbackHandler:
 		if job.Method == "" {
 			return nil, nil
 		}

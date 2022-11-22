@@ -57,7 +57,7 @@ type Callback func(fromChainId *big.Int, tx bridgeCore.Transaction, data []byte)
 
 For delegating a callback on event, we implement callback methods following the above type
 ```go
-func (l *ConreteListener) WithdrewCallback(fromChainId *big.Int, tx internal.Transaction, data []byte) error {
+func (l *ConreteListener) WithdrewCallback(fromChainId *big.Int, tx bridge_core.Transaction, data []byte) error {
 	// implementation here
 }
 ```
@@ -66,25 +66,25 @@ Next, we create an instance of controller. Before creating, we need to call `Add
 
 Type of init function:
 ```go
-type Init func(ctx context.Context, lsConfig *internal.LsConfig, store stores.MainStore, helpers utils.Utils) internal.Listener
+type Init func(ctx context.Context, lsConfig *bridge_core.LsConfig, store stores.MainStore, helpers utils.Utils) bridge_core.Listener
 ```
 
 ```go
-func CreateController(cfg *internal.Config, db *gorm.DB) *internal.Controller {
-	internal.AddListener("Ethereum", InitEthereum)
-	internal.AddListener("Ronin", InitRonin)
-	controller, err := internal.New(cfg, db, nil)
+func CreateController(cfg *bridge_core.Config, db *gorm.DB) *bridge_core.Controller {
+	bridge_core.AddListener("Ethereum", InitEthereum)
+	bridge_core.AddListener("Ronin", InitRonin)
+	controller, err := bridge_core.New(cfg, db, nil)
 	if err != nil {
 		panic(err)
 	}
 	return controller
 }
 
-func InitEthereum(ctx context.Context, lsConfig *internal.LsConfig, store stores.MainStore, helpers utils.Utils) internal.Listener {
+func InitEthereum(ctx context.Context, lsConfig *bridge_core.LsConfig, store stores.MainStore, helpers utils.Utils) bridge_core.Listener {
 	// implementation here
 }
 
-func InitRonin(ctx context.Context, lsConfig *internal.LsConfig, store stores.MainStore, helpers utils.Utils) internal.Listener {
+func InitRonin(ctx context.Context, lsConfig *bridge_core.LsConfig, store stores.MainStore, helpers utils.Utils) bridge_core.Listener {
 	// implementation here
 }
 ```
@@ -92,20 +92,20 @@ func InitRonin(ctx context.Context, lsConfig *internal.LsConfig, store stores.Ma
 ### Configuration
 we need a configuration:
 ```go
-	config := &internal.Config{
-		Listeners: map[string]*internal.LsConfig{
+	config := &bridge_core.Config{
+		Listeners: map[string]*bridge_core.LsConfig{
 			"Ethereum": {
 				ChainId: "0x03",
 				Name:    "Ethereum",
 				RpcUrl:  "url",
-				Subscriptions: map[string]*internal.Subscribe{
+				Subscriptions: map[string]*bridge_core.Subscribe{
 					"WithdrewSubscription": {
 						To:   "0x4E4D9B21B157CCD52b978C3a3BCd1dc5eBAE7167",
 						Type: 1, // 0 for listening, 1 for callback
 						CallBacks: map[string]string{
 							"Ethereum": "WithdrewCallback", // Key: Value is Chain name: method name
 						},
-						Handler: &internal.Handler{
+						Handler: &bridge_core.Handler{
 							Contract: "EthereumGateway", // contract name
 							Name:     "Withdrew",        // Event name
 						},
@@ -116,14 +116,14 @@ we need a configuration:
 				ChainId: "0x7e5",
 				Name:    "Ronin",
 				RpcUrl:  "url",
-				Subscriptions: map[string]*internal.Subscribe{
+				Subscriptions: map[string]*bridge_core.Subscribe{
 					"DepositedCallback": {
 						To:   "0xA8D61A5427a778be28Bd9bb5990956b33385c738",
 						Type: 1, // 0 for listening, 1 for callback
 						CallBacks: map[string]string{
 							"Ronin": "DepositedCallback", // Key: Value is Chain name: method name
 						},
-						Handler: &internal.Handler{
+						Handler: &bridge_core.Handler{
 							Contract: "RoninGateway", // contract name
 							Name:     "Deposited",    // Event name
 						},
