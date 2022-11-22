@@ -1,4 +1,4 @@
-package internal
+package bridge_core
 
 import (
 	"context"
@@ -69,6 +69,11 @@ type Listener interface {
 
 	GetValidatorSign() utils.ISign
 	GetRelayerSign() utils.ISign
+
+	AddListeners(map[string]Listener)
+
+	// GetListener returns listener by name
+	GetListener(string) Listener
 }
 
 type Transaction interface {

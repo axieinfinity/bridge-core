@@ -1,4 +1,4 @@
-package internal
+package bridge_core
 
 import (
 	"context"
@@ -6,8 +6,6 @@ import (
 	"errors"
 	"runtime/debug"
 	"strings"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	bridge_contracts "github.com/axieinfinity/bridge-contracts"
@@ -25,12 +23,9 @@ import (
 )
 
 const (
-	defaultBatchSize        = 100
-	defaultWorkers          = 8182
-	defaultMaxQueueSize     = 4096
-	defaultCoolDownDuration = 1
-	defaultMaxRetry         = 10
-	defaultTaskInterval     = 3
+	defaultBatchSize    = 100
+	defaultMaxRetry     = 10
+	defaultTaskInterval = 3
 )
 
 var listeners map[string]func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore, helpers utils.Utils) Listener
@@ -44,7 +39,6 @@ func AddListener(name string, initFunc func(ctx context.Context, lsConfig *LsCon
 }
 
 type Controller struct {
-	lock       sync.Mutex
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 
@@ -52,33 +46,10 @@ type Controller struct {
 	HandlerABIs map[string]*abi.ABI
 	utilWrapper utils.Utils
 
-	Workers []*Worker
-
-	// message backoff
-	MaxRetry int32
-	BackOff  int32
-
-	// coolDownDuration is used to sleep for a while when a channel reaches its size
-	coolDownDuration int
-
-	// Queue holds a list of worker
-	Queue chan chan JobHandler
-
-	// JobChan receives new job
-	JobChan        chan JobHandler
-	SuccessJobChan chan JobHandler
-	FailedJobChan  chan JobHandler
-	PrepareJobChan chan JobHandler
-
-	jobId         int32
-	processedJobs sync.Map
-
-	MaxQueueSize int
-	cfg          *Config
+	Pool *Pool
+	cfg  *Config
 
 	store               stores.MainStore
-	stop                chan struct{}
-	isClosed            atomic.Value
 	hasSubscriptionType map[string]map[int]bool
 
 	processingFrame int64
@@ -98,41 +69,28 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 		listeners:           make(map[string]Listener),
 		HandlerABIs:         make(map[string]*abi.ABI),
 		utilWrapper:         utils.NewUtils(),
-		Workers:             make([]*Worker, 0),
-		MaxRetry:            100,
-		BackOff:             5,
-		MaxQueueSize:        defaultMaxQueueSize,
-		coolDownDuration:    defaultCoolDownDuration,
-		store:               stores.NewMainStore(db),
-		stop:                make(chan struct{}),
-		isClosed:            atomic.Value{},
-		hasSubscriptionType: make(map[string]map[int]bool),
 		processingFrame:     time.Now().Unix(),
+		store:               stores.NewMainStore(db),
+		hasSubscriptionType: make(map[string]map[int]bool),
+		Pool:                NewPool(ctx, cfg, db, nil),
+		cb: gobreaker.NewCircuitBreaker(gobreaker.Settings{
+			Name:     "process pending jobs",
+			Interval: 60 * time.Second,
+			Timeout:  60 * time.Second,
+			ReadyToTrip: func(counts gobreaker.Counts) bool {
+				failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
+				return (counts.Requests > 10 && failureRatio >= 0.8) || counts.ConsecutiveFailures > 5
+			},
+		}),
 	}
-
-	c.cb = gobreaker.NewCircuitBreaker(gobreaker.Settings{
-		Name:     "process pending jobs",
-		Interval: 60 * time.Second,
-		Timeout:  60 * time.Second,
-		ReadyToTrip: func(counts gobreaker.Counts) bool {
-			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-			return (counts.Requests > 10 && failureRatio >= 0.8) || counts.ConsecutiveFailures > 5
-		},
-	})
 
 	if adapters.AppConfig.Prometheus.TurnOn {
 		metrics.RunPusher(ctx)
 	}
 
-	c.isClosed.Store(false)
 	if helpers != nil {
 		c.utilWrapper = helpers
 	}
-	c.JobChan = make(chan JobHandler, c.MaxQueueSize*cfg.NumberOfWorkers)
-	c.PrepareJobChan = make(chan JobHandler, c.MaxQueueSize)
-	c.SuccessJobChan = make(chan JobHandler, c.MaxQueueSize)
-	c.FailedJobChan = make(chan JobHandler, c.MaxQueueSize)
-	c.Queue = make(chan chan JobHandler, c.MaxQueueSize)
 
 	// add listeners from config
 	for name, lsConfig := range c.cfg.Listeners {
@@ -157,7 +115,10 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 			return nil, errors.New("listener is nil")
 		}
 		// set prepare job chan to listener
-		l.SetPrepareJobChan(c.PrepareJobChan)
+		l.SetPrepareJobChan(c.Pool.PrepareJobChan)
+
+		// set listeners to listeners
+		l.AddListeners(c.listeners)
 
 		// add listener to controller
 		c.listeners[name] = l
@@ -174,15 +135,14 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 			}
 			c.hasSubscriptionType[name][subscription.Type] = true
 		}
-
 	}
-
+	var workers []Worker
 	// init workers
 	for i := 0; i < cfg.NumberOfWorkers; i++ {
-		w := NewWorker(ctx, i, c.PrepareJobChan, c.FailedJobChan, c.SuccessJobChan, c.Queue, c.MaxQueueSize, c.listeners)
-		c.Workers = append(c.Workers, w)
+		w := NewWorker(ctx, i, c.Pool.PrepareJobChan, c.Pool.FailedJobChan, c.Pool.SuccessJobChan, c.Pool.Queue, c.Pool.MaxQueueSize, c.listeners)
+		workers = append(workers, w)
 	}
-
+	c.Pool.AddWorkers(workers)
 	return c, nil
 }
 
@@ -201,161 +161,8 @@ func (c *Controller) LoadABIsFromConfig(lsConfig *LsConfig) (err error) {
 	return
 }
 
-// prepareJob saves new job to database
-func (c *Controller) prepareJob(job JobHandler) error {
-	if job == nil {
-		return nil
-	}
-	log.Info("[PrepareJobChan] preparing new job", "job", job.String())
-	// deduplication: get hash from data and type and check if it exists in `processedJobs` or not.
-	hash := c.utilWrapper.RlpHash(struct {
-		Data []byte
-		Type int
-	}{
-		Data: job.GetData(),
-		Type: job.GetType(),
-	})
-	if _, ok := c.processedJobs.Load(hash); ok {
-		return nil
-	}
-	// save job to db if id = 0
-	if job.GetID() == 0 {
-		return job.Save()
-	}
-	// cache above hash to `processedJobs`
-	c.processedJobs.Store(hash, struct{}{})
-	return nil
-}
-
-// processSuccessJob updates job's status to `done` to database
-func (c *Controller) processSuccessJob(job JobHandler) {
-	if job == nil {
-		return
-	}
-
-	log.Info("process job success", "id", job.GetID())
-	if err := job.Update(stores.STATUS_DONE); err != nil {
-		log.Error("[Controller] failed on updating success job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
-		// send back job to successJobChan
-		c.SuccessJobChan <- job
-		return
-	}
-}
-
-// processFailedJob updates job's status to `failed` to database
-func (c *Controller) processFailedJob(job JobHandler) {
-	if job == nil {
-		return
-	}
-
-	log.Info("process job failed", "id", job.GetID())
-	if err := job.Update(stores.STATUS_FAILED); err != nil {
-		log.Error("[Controller] failed on updating failed job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
-		// send back job to failedJobChan
-		c.FailedJobChan <- job
-		return
-	}
-}
-
 func (c *Controller) Start() error {
-	for _, worker := range c.Workers {
-		go worker.start()
-	}
-	go func() {
-		for {
-			select {
-			case job := <-c.SuccessJobChan:
-				c.processSuccessJob(job)
-			case job := <-c.FailedJobChan:
-				c.processFailedJob(job)
-			case job := <-c.PrepareJobChan:
-				if job == nil {
-					continue
-				}
-				// add new job to database before processing
-				if err := c.prepareJob(job); err != nil {
-					log.Error("[Controller] failed on preparing job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
-					metrics.Pusher.IncrCounter(metrics.PreparingFailedJobMetric, 1)
-					continue
-				}
-				metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
-				c.JobChan <- job
-			case job := <-c.JobChan:
-				if job == nil {
-					continue
-				}
-				// get 1 workerCh from queue and push job to this channel
-				hash := job.Hash()
-				if _, ok := c.processedJobs.LoadOrStore(hash, struct{}{}); ok {
-					continue
-				}
-				log.Info("[Controller] jobChan received a job", "jobId", job.GetID(), "nextTry", job.GetNextTry(), "type", job.GetType())
-				workerCh := <-c.Queue
-				workerCh <- job
-			case <-c.ctx.Done():
-				// prevent ctx.Done is called multiple times among routines.
-				if c.isClosed.Load().(bool) {
-					return
-				} else {
-					c.isClosed.Store(true)
-				}
-
-				// close listeners first to prevent further tasks processing
-				c.closeListeners()
-
-				// loop through prepare job chan to store all jobs to db
-				for {
-					if len(c.PrepareJobChan) == 0 {
-						break
-					}
-					job, more := <-c.PrepareJobChan
-					if !more {
-						break
-					}
-					if err := c.prepareJob(job); err != nil {
-						log.Error("[Controller] error while storing all jobs from prepareJobChan to database in closing step", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
-					}
-				}
-
-				// update all success jobs
-				for {
-					log.Info("checking successJobChan")
-					if len(c.SuccessJobChan) == 0 {
-						break
-					}
-					job, more := <-c.SuccessJobChan
-					if !more {
-						break
-					}
-					c.processSuccessJob(job)
-				}
-
-				// wait until all failed jobs are handled
-				for {
-					if len(c.FailedJobChan) == 0 {
-						break
-					}
-					log.Info("checking failedJobChan")
-					job, more := <-c.FailedJobChan
-					if !more {
-						break
-					}
-					c.processFailedJob(job)
-				}
-
-				// close all available channels
-				close(c.PrepareJobChan)
-				close(c.JobChan)
-				close(c.SuccessJobChan)
-				close(c.FailedJobChan)
-				close(c.Queue)
-
-				// send signal to stop the program
-				c.stop <- struct{}{}
-				break
-			}
-		}
-	}()
+	go c.Pool.Start(c.closeListeners)
 	go c.processPendingJobs()
 	c.startListeners()
 	return nil
@@ -367,11 +174,9 @@ func (c *Controller) processPendingJobs() {
 	for _, v := range c.listeners {
 		listeners = append(listeners, v.GetName())
 	}
-
 	if len(listeners) == 0 {
 		return
 	}
-
 	for {
 		select {
 		case <-ticker.C:
@@ -417,7 +222,7 @@ func (c *Controller) processPendingJobs() {
 				j, _ := ji.(JobHandler)
 				// add job to jobChan
 				if j != nil {
-					c.PrepareJobChan <- j
+					c.Pool.PrepareJobChan <- j
 				}
 			}
 		}
@@ -453,10 +258,6 @@ func (c *Controller) closeListeners() {
 	for _, listener := range c.listeners {
 		listener.Close()
 	}
-}
-
-func (c *Controller) Wait() {
-	<-c.stop
 }
 
 // startListener starts listening events for a listener, it comes with a tryCount which close this listener if tryCount reaches 10 times
@@ -504,8 +305,8 @@ func (c *Controller) startListening(listener Listener, tryCount int) {
 		case <-listener.Context().Done():
 			return
 		case <-tick.C:
-			// stop if controller is closed
-			if c.isClosed.Load().(bool) {
+			// stop if the pool is closed
+			if c.Pool.IsClosed() {
 				return
 			}
 			latest, err := listener.GetLatestBlockHeight()
@@ -631,13 +432,13 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 			name := eventIds[eventId]
 			tx := NewEmptyTransaction(chainId, eventLog.TxHash, eventLog.Data, nil, &eventLog.Address)
 			if job := listener.GetListenHandleJob(name, tx, eventId.Hex(), data); job != nil {
-				if err := c.prepareJob(job); err != nil {
+				if err := c.Pool.PrepareJob(job); err != nil {
 					log.Error("[Controller] failed on preparing job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
 					metrics.Pusher.IncrCounter(metrics.PreparingFailedJobMetric, 1)
 					continue
 				}
 				metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
-				c.JobChan <- job
+				c.Pool.JobChan <- job
 			}
 		}
 		block, _ := listener.GetBlock(fromHeight)
@@ -663,7 +464,7 @@ func (c *Controller) processTxs(listener Listener, txs []Transaction) {
 			eventId := tx.GetData()[0:4]
 			data := tx.GetData()[4:]
 			if job := listener.GetListenHandleJob(name, tx, common.Bytes2Hex(eventId), data); job != nil {
-				c.PrepareJobChan <- job
+				c.Pool.PrepareJobChan <- job
 			}
 		}
 	}
@@ -690,10 +491,10 @@ func (c *Controller) LoadAbi(path string) (*abi.ABI, error) {
 
 func (c *Controller) Close() {
 	// load isClosed
-	val := c.isClosed.Load().(bool)
+	val := c.Pool.IsClosed()
 	if !val {
 		log.Info("closing")
 		c.cancelFunc()
 	}
-	c.Wait()
+	c.Pool.Wait()
 }
