@@ -95,16 +95,21 @@ func (p *Pool) AddWorkers(workers []Worker) {
 func (p *Pool) startWorker(w Worker) {
 	defer func() {
 		if r := recover(); r != nil {
+			if err, ok := r.(error); ok && err.Error() == "send on closed channel" {
+				w.Close()
+				return
+			}
 			log.Error("[BridgeWorker][addToQueue] recover from panic", "message", r, "trace", string(debug.Stack()))
 		}
 	}()
 	for {
 		// push worker chan into queue if worker has not closed yet
-		if !w.IsClose() {
-			w.WorkersQueue() <- w.Channel()
-		}
+		w.WorkersQueue() <- w.Channel()
 		select {
 		case job := <-w.Channel():
+			if job == nil {
+				continue
+			}
 			log.Info("processing job", "id", job.GetID(), "nextTry", job.GetNextTry(), "retryCount", job.GetRetryCount(), "type", job.GetType())
 			if job.GetNextTry() == 0 || job.GetNextTry() <= time.Now().Unix() {
 				metrics.Pusher.IncrGauge(metrics.ProcessingJobMetric, 1)
@@ -212,7 +217,8 @@ func (p *Pool) Start(closeFunc func()) {
 			close(p.SuccessJobChan)
 			close(p.FailedJobChan)
 			close(p.Queue)
-
+			
+			log.Info("finish closing pool")
 			// send signal to stop the program
 			p.stop <- struct{}{}
 			return
@@ -225,7 +231,6 @@ func (p *Pool) PrepareJob(job JobHandler) error {
 	if job == nil {
 		return nil
 	}
-	log.Info("[PrepareJobChan] preparing new job", "job", job.String())
 	// deduplication: get hash from data and type and check if it exists in `processedJobs` or not.
 	hash := p.utils.RlpHash(struct {
 		Data []byte
@@ -234,6 +239,7 @@ func (p *Pool) PrepareJob(job JobHandler) error {
 		Data: job.GetData(),
 		Type: job.GetType(),
 	})
+	log.Info("[PrepareJobChan] preparing new job", "job", job.String(), "hash", hash.Hex())
 	if _, ok := p.processedJobs.Load(hash); ok {
 		return nil
 	}

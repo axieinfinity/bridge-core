@@ -153,6 +153,9 @@ func (u *utils) NewEthClient(url string) (EthClient, error) {
 }
 
 func newKeyedTransactorWithChainID(signMethod ISign, chainID *big.Int) (*bind.TransactOpts, error) {
+	if signMethod == nil {
+		return nil, errors.New("no sign method found")
+	}
 	keyAddr := signMethod.GetAddress()
 	signer := types.LatestSignerForChainID(chainID)
 	return &bind.TransactOpts{
