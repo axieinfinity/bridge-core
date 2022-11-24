@@ -261,6 +261,8 @@ func (p *Pool) PrepareRetryableJob(job JobHandler) {
 	select {
 	case <-timer.C:
 		p.PrepareJobChan <- job
+	case <-p.ctx.Done():
+		p.updateRetryingJob(job)
 	}
 }
 
