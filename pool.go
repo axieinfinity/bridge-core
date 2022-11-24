@@ -34,6 +34,7 @@ type Pool struct {
 
 	// JobChan receives new job
 	JobChan        chan JobHandler
+	RetryJobChan   chan JobHandler
 	SuccessJobChan chan JobHandler
 	FailedJobChan  chan JobHandler
 	PrepareJobChan chan JobHandler
@@ -70,6 +71,7 @@ func NewPool(ctx context.Context, cfg *Config, db *gorm.DB, workers []Worker) *P
 	pool.PrepareJobChan = make(chan JobHandler, pool.MaxQueueSize)
 	pool.SuccessJobChan = make(chan JobHandler, pool.MaxQueueSize)
 	pool.FailedJobChan = make(chan JobHandler, pool.MaxQueueSize)
+	pool.RetryJobChan = make(chan JobHandler, pool.MaxQueueSize)
 	pool.Queue = make(chan chan JobHandler, pool.MaxQueueSize)
 
 	if workers != nil {
@@ -111,12 +113,20 @@ func (p *Pool) startWorker(w Worker) {
 				continue
 			}
 			log.Info("processing job", "id", job.GetID(), "nextTry", job.GetNextTry(), "retryCount", job.GetRetryCount(), "type", job.GetType())
-			if job.GetNextTry() == 0 || job.GetNextTry() <= time.Now().Unix() {
-				metrics.Pusher.IncrGauge(metrics.ProcessingJobMetric, 1)
-				w.ProcessJob(job)
-				metrics.Pusher.IncrGauge(metrics.ProcessingJobMetric, -1)
-				continue
+			metrics.Pusher.IncrGauge(metrics.ProcessingJobMetric, 1)
+			if err := w.ProcessJob(job); err != nil {
+				// update try and next retry time
+				if job.GetRetryCount()+1 > job.GetMaxTry() {
+					log.Info("[Pool][processJob] job reaches its maxTry", "jobTransaction", job.GetTransaction().GetHash().Hex())
+					p.FailedJobChan <- job
+					return
+				}
+				job.IncreaseRetryCount()
+				job.UpdateNextTry(time.Now().Unix() + int64(job.GetRetryCount()*job.GetBackOff()))
+				// send to retry job chan
+				p.RetryJobChan <- job
 			}
+			metrics.Pusher.IncrGauge(metrics.ProcessingJobMetric, -1)
 			// push the job back to mainChan
 			w.PoolChannel() <- job
 		case <-w.Context().Done():
@@ -140,6 +150,8 @@ func (p *Pool) Start(closeFunc func()) {
 			p.processSuccessJob(job)
 		case job := <-p.FailedJobChan:
 			p.processFailedJob(job)
+		case job := <-p.RetryJobChan:
+			go p.PrepareRetryableJob(job)
 		case job := <-p.PrepareJobChan:
 			if job == nil {
 				continue
@@ -185,6 +197,19 @@ func (p *Pool) Start(closeFunc func()) {
 				}
 			}
 
+			for {
+				log.Info("checking retrying jobs")
+				if len(p.RetryJobChan) == 0 {
+					break
+				}
+				job, more := <-p.RetryJobChan
+				if !more {
+					break
+				}
+				// update job
+				p.updateRetryingJob(job)
+			}
+
 			// update all success jobs
 			for {
 				log.Info("checking successJobChan")
@@ -216,13 +241,26 @@ func (p *Pool) Start(closeFunc func()) {
 			close(p.JobChan)
 			close(p.SuccessJobChan)
 			close(p.FailedJobChan)
+			close(p.RetryJobChan)
 			close(p.Queue)
-			
+
 			log.Info("finish closing pool")
 			// send signal to stop the program
 			p.stop <- struct{}{}
 			return
 		}
+	}
+}
+
+func (p *Pool) PrepareRetryableJob(job JobHandler) {
+	dur := time.Until(time.Unix(job.GetNextTry(), 0))
+	if dur <= 0 {
+		return
+	}
+	timer := time.NewTimer(dur)
+	select {
+	case <-timer.C:
+		p.PrepareJobChan <- job
 	}
 }
 
@@ -250,6 +288,19 @@ func (p *Pool) PrepareJob(job JobHandler) error {
 	// cache above hash to `processedJobs`
 	p.processedJobs.Store(hash, struct{}{})
 	return nil
+}
+
+func (p *Pool) updateRetryingJob(job JobHandler) {
+	if job == nil {
+		return
+	}
+	log.Info("process retryable job", "id", job.GetID())
+	if err := job.Update(stores.STATUS_PENDING); err != nil {
+		log.Error("[Pool] failed on updating retrying job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
+		// send back job to successJobChan
+		p.RetryJobChan <- job
+		return
+	}
 }
 
 // processSuccessJob updates job's status to `done` to database

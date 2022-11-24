@@ -7,13 +7,12 @@ import (
 	"github.com/axieinfinity/bridge-core/utils"
 	"github.com/ethereum/go-ethereum/log"
 	"sync/atomic"
-	"time"
 )
 
 type Worker interface {
 	Context() context.Context
 	Close()
-	ProcessJob(job JobHandler)
+	ProcessJob(job JobHandler) error
 	IsClose() bool
 	Channel() chan JobHandler
 	PoolChannel() chan<- JobHandler
@@ -63,36 +62,19 @@ func (w *BridgeWorker) String() string {
 	return fmt.Sprintf("{ id: %d, currentSize: %d }", w.id, len(w.workerChan))
 }
 
-func (w *BridgeWorker) ProcessJob(job JobHandler) {
-	var (
-		err error
-		val []byte
-	)
-
-	val, err = job.Process()
+func (w *BridgeWorker) ProcessJob(job JobHandler) error {
+	val, err := job.Process()
 	if err != nil {
 		log.Error("[BridgeWorker] failed while processing job", "id", job.GetID(), "err", err)
-		goto ERROR
+		metrics.Pusher.IncrCounter(metrics.ProcessedFailedJobMetric, 1)
+		return err
 	}
 	if job.GetType() == ListenHandler && job.GetSubscriptionName() != "" {
 		job.GetListener().SendCallbackJobs(w.listeners, job.GetSubscriptionName(), job.GetTransaction(), val)
 	}
 	metrics.Pusher.IncrCounter(metrics.ProcessedSuccessJobMetric, 1)
 	w.successChan <- job
-	return
-ERROR:
-	metrics.Pusher.IncrCounter(metrics.ProcessedFailedJobMetric, 1)
-
-	if job.GetRetryCount()+1 > job.GetMaxTry() {
-		log.Info("[BridgeWorker][processJob] job reaches its maxTry", "jobTransaction", job.GetTransaction().GetHash().Hex())
-		w.failedChan <- job
-		return
-	}
-	job.IncreaseRetryCount()
-	job.UpdateNextTry(time.Now().Unix() + int64(job.GetRetryCount()*job.GetBackOff()))
-	// push the job back to mainChan
-	w.mainChan <- job
-	log.Info("[BridgeWorker][processJob] job failed, added back to jobChan", "id", job.GetID(), "retryCount", job.GetRetryCount(), "nextTry", job.GetNextTry())
+	return nil
 }
 
 func (w *BridgeWorker) Context() context.Context {
