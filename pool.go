@@ -116,7 +116,7 @@ func (p *Pool) startWorker(w Worker) {
 				if job.GetRetryCount()+1 > job.GetMaxTry() {
 					log.Info("[Pool][processJob] job reaches its maxTry", "jobTransaction", job.GetTransaction().GetHash().Hex())
 					p.FailedJobChan <- job
-					return
+					continue
 				}
 				job.IncreaseRetryCount()
 				job.UpdateNextTry(time.Now().Unix() + int64(job.GetRetryCount()*job.GetBackOff()))
@@ -124,8 +124,6 @@ func (p *Pool) startWorker(w Worker) {
 				p.RetryJobChan <- job
 			}
 			metrics.Pusher.IncrGauge(metrics.ProcessingJobMetric, -1)
-			// push the job back to mainChan
-			w.PoolChannel() <- job
 		case <-w.Context().Done():
 			w.Close()
 			return
