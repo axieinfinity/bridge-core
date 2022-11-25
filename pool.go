@@ -277,8 +277,6 @@ func (p *Pool) updateRetryingJob(job JobHandler) {
 	log.Info("process retryable job", "id", job.GetID())
 	if err := job.Update(stores.STATUS_PENDING); err != nil {
 		log.Error("[Pool] failed on updating retrying job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
-		// send back job to successJobChan
-		p.RetryJobChan <- job
 		return
 	}
 }
@@ -292,8 +290,6 @@ func (p *Pool) processSuccessJob(job JobHandler) {
 	log.Info("process job success", "id", job.GetID())
 	if err := job.Update(stores.STATUS_DONE); err != nil {
 		log.Error("[Pool] failed on updating success job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
-		// send back job to successJobChan
-		p.SuccessJobChan <- job
 		return
 	}
 }
@@ -307,8 +303,6 @@ func (p *Pool) processFailedJob(job JobHandler) {
 	log.Info("process job failed", "id", job.GetID())
 	if err := job.Update(stores.STATUS_FAILED); err != nil {
 		log.Error("[Pool] failed on updating failed job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
-		// send back job to failedJobChan
-		p.FailedJobChan <- job
 		return
 	}
 }
