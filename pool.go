@@ -9,7 +9,6 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"gorm.io/gorm"
 	"runtime/debug"
-	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -39,9 +38,7 @@ type Pool struct {
 	FailedJobChan  chan JobHandler
 	PrepareJobChan chan JobHandler
 
-	jobId         int32
-	processedJobs sync.Map
-
+	jobId        int32
 	MaxQueueSize int
 
 	store    stores.MainStore
@@ -168,11 +165,6 @@ func (p *Pool) Start(closeFunc func()) {
 			if job == nil {
 				continue
 			}
-			// get 1 workerCh from queue and push job to this channel
-			hash := job.Hash()
-			if _, ok := p.processedJobs.LoadOrStore(hash, struct{}{}); ok {
-				continue
-			}
 			log.Info("[Pool] jobChan received a job", "jobId", job.GetID(), "nextTry", job.GetNextTry(), "type", job.GetType())
 			workerCh := <-p.Queue
 			workerCh <- job
@@ -271,24 +263,10 @@ func (p *Pool) PrepareJob(job JobHandler) error {
 	if job == nil {
 		return nil
 	}
-	// deduplication: get hash from data and type and check if it exists in `processedJobs` or not.
-	hash := p.utils.RlpHash(struct {
-		Data []byte
-		Type int
-	}{
-		Data: job.GetData(),
-		Type: job.GetType(),
-	})
-	log.Info("[PrepareJobChan] preparing new job", "job", job.String(), "hash", hash.Hex())
-	if _, ok := p.processedJobs.Load(hash); ok {
-		return nil
-	}
 	// save job to db if id = 0
 	if job.GetID() == 0 {
 		return job.Save()
 	}
-	// cache above hash to `processedJobs`
-	p.processedJobs.Store(hash, struct{}{})
 	return nil
 }
 
