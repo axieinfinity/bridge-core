@@ -157,6 +157,9 @@ func (p *Pool) Start(closeFunc func()) {
 				metrics.Pusher.IncrCounter(metrics.PreparingFailedJobMetric, 1)
 				continue
 			}
+			if p.isClosed.Load().(bool) {
+				continue
+			}
 			metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
 			p.JobChan <- job
 		case job := <-p.JobChan:
@@ -167,17 +170,24 @@ func (p *Pool) Start(closeFunc func()) {
 			workerCh := <-p.Queue
 			workerCh <- job
 		case <-p.ctx.Done():
+			log.Info("closing pool...")
 			p.isClosed.Store(true)
+
 			// call close function firstly
 			if closeFunc != nil {
 				closeFunc()
 			}
 
-			// loop through prepare job chan to store all jobs to db
+			// close all available channels to prevent further data send to pool's channels
+			close(p.PrepareJobChan)
+			close(p.JobChan)
+			close(p.SuccessJobChan)
+			close(p.FailedJobChan)
+			close(p.RetryJobChan)
+			close(p.Queue)
+
+			// loop through all channels to store all left-over data to db
 			for {
-				if len(p.PrepareJobChan) == 0 {
-					break
-				}
 				job, more := <-p.PrepareJobChan
 				if !more {
 					break
@@ -189,9 +199,6 @@ func (p *Pool) Start(closeFunc func()) {
 
 			for {
 				log.Info("checking retrying jobs")
-				if len(p.RetryJobChan) == 0 {
-					break
-				}
 				job, more := <-p.RetryJobChan
 				if !more {
 					break
@@ -200,12 +207,8 @@ func (p *Pool) Start(closeFunc func()) {
 				p.updateRetryingJob(job)
 			}
 
-			// update all success jobs
 			for {
 				log.Info("checking successJobChan")
-				if len(p.SuccessJobChan) == 0 {
-					break
-				}
 				job, more := <-p.SuccessJobChan
 				if !more {
 					break
@@ -213,11 +216,7 @@ func (p *Pool) Start(closeFunc func()) {
 				p.processSuccessJob(job)
 			}
 
-			// wait until all failed jobs are handled
 			for {
-				if len(p.FailedJobChan) == 0 {
-					break
-				}
 				log.Info("checking failedJobChan")
 				job, more := <-p.FailedJobChan
 				if !more {
@@ -225,16 +224,8 @@ func (p *Pool) Start(closeFunc func()) {
 				}
 				p.processFailedJob(job)
 			}
-
-			// close all available channels
-			close(p.PrepareJobChan)
-			close(p.JobChan)
-			close(p.SuccessJobChan)
-			close(p.FailedJobChan)
-			close(p.RetryJobChan)
-			close(p.Queue)
-
 			log.Info("finish closing pool")
+
 			// send signal to stop the program
 			p.stop <- struct{}{}
 			return
