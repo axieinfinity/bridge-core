@@ -68,6 +68,7 @@ type Listener interface {
 	SetPrepareJobChan(chan JobHandler)
 
 	GetValidatorSign() utils.ISign
+	GetVoterSign() utils.ISign
 	GetRelayerSign() utils.ISign
 
 	AddListeners(map[string]Listener)
@@ -182,6 +183,7 @@ type LsConfig struct {
 
 type Secret struct {
 	Validator *utils.SignMethodConfig `json:"validator"`
+	Voter     *utils.SignMethodConfig `json:"voter"`
 	Relayer   *utils.SignMethodConfig `json:"relayer"`
 }
 
