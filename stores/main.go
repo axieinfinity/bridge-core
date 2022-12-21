@@ -16,6 +16,7 @@ const (
 	STATUS_FAILED     = "failed"
 	STATUS_PROCESSING = "processing"
 	STATUS_DONE       = "done"
+	STATUS_PROCESSED  = "processed"
 )
 
 type Database struct {

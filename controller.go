@@ -139,7 +139,7 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 	var workers []Worker
 	// init workers
 	for i := 0; i < cfg.NumberOfWorkers; i++ {
-		w := NewWorker(ctx, i, c.Pool.PrepareJobChan, c.Pool.FailedJobChan, c.Pool.SuccessJobChan, c.Pool.Queue, c.Pool.MaxQueueSize, c.listeners)
+		w := NewWorker(ctx, i, c.Pool.PrepareJobChan, c.Pool.FailedJobChan, c.Pool.Queue, c.Pool.MaxQueueSize, c.listeners)
 		workers = append(workers, w)
 	}
 	c.Pool.AddWorkers(workers)
@@ -223,6 +223,8 @@ func (c *Controller) processPendingJobs() {
 				// add job to jobChan
 				if j != nil {
 					c.Pool.PrepareJobChan <- j
+					job.Status = stores.STATUS_PROCESSED
+					c.store.GetJobStore().Update(job)
 				}
 			}
 		}
@@ -298,6 +300,17 @@ func (c *Controller) startListening(listener Listener, tryCount int) {
 			return
 		}
 	}
+
+	// start stats reporter
+	statsTick := time.NewTicker(2 * time.Second)
+	go func() {
+		select {
+		case <-statsTick.C:
+			stats := c.Pool.Stats()
+			log.Info("[Controller] pool stats", "pending", stats.PendingQueue, "queue", stats.Queue)
+		}
+	}()
+
 	// start listening to block's events
 	tick := time.NewTicker(listener.Period())
 	for {
@@ -307,6 +320,8 @@ func (c *Controller) startListening(listener Listener, tryCount int) {
 		case <-tick.C:
 			// stop if the pool is closed
 			if c.Pool.IsClosed() {
+				// wait for pool is totally shutdown
+				c.Pool.Wait()
 				return
 			}
 			latest, err := listener.GetLatestBlockHeight()

@@ -3,9 +3,9 @@ package bridge_core
 import (
 	"context"
 	"fmt"
-	"github.com/axieinfinity/bridge-core/metrics"
 	"github.com/axieinfinity/bridge-core/utils"
 	"github.com/ethereum/go-ethereum/log"
+	"github.com/go-stack/stack"
 	"sync/atomic"
 )
 
@@ -17,7 +17,6 @@ type Worker interface {
 	Channel() chan JobHandler
 	PoolChannel() chan<- JobHandler
 	FailedChannel() chan<- JobHandler
-	SuccessChannel() chan<- JobHandler
 	WorkersQueue() chan chan JobHandler
 }
 
@@ -44,14 +43,13 @@ type BridgeWorker struct {
 	isClose   int32
 }
 
-func NewWorker(ctx context.Context, id int, mainChan, failedChan, successChan chan<- JobHandler, queue chan chan JobHandler, size int, listeners map[string]Listener) *BridgeWorker {
+func NewWorker(ctx context.Context, id int, mainChan, failedChan chan<- JobHandler, queue chan chan JobHandler, size int, listeners map[string]Listener) *BridgeWorker {
 	return &BridgeWorker{
 		ctx:         ctx,
 		id:          id,
 		workerChan:  make(chan JobHandler, size),
 		mainChan:    mainChan,
 		failedChan:  failedChan,
-		successChan: successChan,
 		queue:       queue,
 		listeners:   listeners,
 		utilWrapper: utils.NewUtils(),
@@ -65,15 +63,12 @@ func (w *BridgeWorker) String() string {
 func (w *BridgeWorker) ProcessJob(job JobHandler) error {
 	val, err := job.Process()
 	if err != nil {
-		log.Error("[BridgeWorker] failed while processing job", "id", job.GetID(), "err", err)
-		metrics.Pusher.IncrCounter(metrics.ProcessedFailedJobMetric, 1)
+		log.Error("[BridgeWorker] failed while processing job", "id", job.GetID(), "err", err, "stack", stack.Trace().String())
 		return err
 	}
 	if job.GetType() == ListenHandler && job.GetSubscriptionName() != "" {
 		job.GetListener().SendCallbackJobs(w.listeners, job.GetSubscriptionName(), job.GetTransaction(), val)
 	}
-	metrics.Pusher.IncrCounter(metrics.ProcessedSuccessJobMetric, 1)
-	w.successChan <- job
 	return nil
 }
 
@@ -99,10 +94,6 @@ func (w *BridgeWorker) PoolChannel() chan<- JobHandler {
 
 func (w *BridgeWorker) FailedChannel() chan<- JobHandler {
 	return w.failedChan
-}
-
-func (w *BridgeWorker) SuccessChannel() chan<- JobHandler {
-	return w.successChan
 }
 
 func (w *BridgeWorker) Close() {

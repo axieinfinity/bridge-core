@@ -2,6 +2,7 @@ package bridge_core
 
 import (
 	"context"
+	"errors"
 	"github.com/axieinfinity/bridge-core/adapters"
 	"github.com/axieinfinity/bridge-core/metrics"
 	"github.com/axieinfinity/bridge-core/stores"
@@ -17,6 +18,11 @@ const (
 	defaultWorkers      = 8182
 	defaultMaxQueueSize = 4096
 )
+
+type Stats struct {
+	PendingQueue int
+	Queue        int
+}
 
 type Pool struct {
 	ctx context.Context
@@ -34,7 +40,6 @@ type Pool struct {
 	// JobChan receives new job
 	JobChan        chan JobHandler
 	RetryJobChan   chan JobHandler
-	SuccessJobChan chan JobHandler
 	FailedJobChan  chan JobHandler
 	PrepareJobChan chan JobHandler
 
@@ -66,7 +71,6 @@ func NewPool(ctx context.Context, cfg *Config, db *gorm.DB, workers []Worker) *P
 	pool.isClosed.Store(false)
 	pool.JobChan = make(chan JobHandler, pool.MaxQueueSize*cfg.NumberOfWorkers)
 	pool.PrepareJobChan = make(chan JobHandler, pool.MaxQueueSize)
-	pool.SuccessJobChan = make(chan JobHandler, pool.MaxQueueSize)
 	pool.FailedJobChan = make(chan JobHandler, pool.MaxQueueSize)
 	pool.RetryJobChan = make(chan JobHandler, pool.MaxQueueSize)
 	pool.Queue = make(chan chan JobHandler, pool.MaxQueueSize)
@@ -109,8 +113,14 @@ func (p *Pool) startWorker(w Worker) {
 			if job == nil {
 				continue
 			}
+			if p.isClosed.Load().(bool) {
+				// update job to db
+				if err := job.Update(stores.STATUS_PENDING); err != nil {
+					log.Error("[Pool] failed on updating failed job", "err", err, "jobType", job.GetType())
+				}
+				continue
+			}
 			log.Info("processing job", "id", job.GetID(), "nextTry", job.GetNextTry(), "retryCount", job.GetRetryCount(), "type", job.GetType())
-			metrics.Pusher.IncrGauge(metrics.ProcessingJobMetric, 1)
 			if err := w.ProcessJob(job); err != nil {
 				// update try and next retry time
 				if job.GetRetryCount()+1 > job.GetMaxTry() {
@@ -123,7 +133,6 @@ func (p *Pool) startWorker(w Worker) {
 				// send to retry job chan
 				p.RetryJobChan <- job
 			}
-			metrics.Pusher.IncrGauge(metrics.ProcessingJobMetric, -1)
 		case <-w.Context().Done():
 			w.Close()
 			return
@@ -138,11 +147,8 @@ func (p *Pool) Start(closeFunc func()) {
 	for _, worker := range p.Workers {
 		go p.startWorker(worker)
 	}
-
 	for {
 		select {
-		case job := <-p.SuccessJobChan:
-			p.processSuccessJob(job)
 		case job := <-p.FailedJobChan:
 			p.processFailedJob(job)
 		case job := <-p.RetryJobChan:
@@ -154,16 +160,23 @@ func (p *Pool) Start(closeFunc func()) {
 			// add new job to database before processing
 			if err := p.PrepareJob(job); err != nil {
 				log.Error("[Pool] failed on preparing job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
-				metrics.Pusher.IncrCounter(metrics.PreparingFailedJobMetric, 1)
 				continue
 			}
 			if p.isClosed.Load().(bool) {
+				if err := job.Update(stores.STATUS_PENDING); err != nil {
+					log.Error("[Pool] failed on saving pending job", "err", err, "jobType", job.GetType())
+				}
 				continue
 			}
-			metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
 			p.JobChan <- job
 		case job := <-p.JobChan:
 			if job == nil {
+				continue
+			}
+			if p.isClosed.Load().(bool) {
+				if err := job.Update(stores.STATUS_PENDING); err != nil {
+					log.Error("[Pool] failed on saving processing job", "err", err, "jobType", job.GetType())
+				}
 				continue
 			}
 			log.Info("[Pool] jobChan received a job", "jobId", job.GetID(), "nextTry", job.GetNextTry(), "type", job.GetType())
@@ -181,7 +194,6 @@ func (p *Pool) Start(closeFunc func()) {
 			// close all available channels to prevent further data send to pool's channels
 			close(p.PrepareJobChan)
 			close(p.JobChan)
-			close(p.SuccessJobChan)
 			close(p.FailedJobChan)
 			close(p.RetryJobChan)
 			close(p.Queue)
@@ -192,8 +204,8 @@ func (p *Pool) Start(closeFunc func()) {
 				if !more {
 					break
 				}
-				if err := p.PrepareJob(job); err != nil {
-					log.Error("[Pool] error while storing all jobs from prepareJobChan to database in closing step", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
+				if err := job.Update(stores.STATUS_PENDING); err != nil {
+					log.Error("[Pool] failed on updating failed job", "err", err, "jobType", job.GetType())
 				}
 			}
 
@@ -205,15 +217,6 @@ func (p *Pool) Start(closeFunc func()) {
 				}
 				// update job
 				p.updateRetryingJob(job)
-			}
-
-			for {
-				log.Info("checking successJobChan")
-				job, more := <-p.SuccessJobChan
-				if !more {
-					break
-				}
-				p.processSuccessJob(job)
 			}
 
 			for {
@@ -230,6 +233,13 @@ func (p *Pool) Start(closeFunc func()) {
 			p.stop <- struct{}{}
 			return
 		}
+	}
+}
+
+func (p *Pool) Stats() Stats {
+	return Stats{
+		PendingQueue: len(p.PrepareJobChan),
+		Queue:        len(p.JobChan),
 	}
 }
 
@@ -250,11 +260,7 @@ func (p *Pool) PrepareRetryableJob(job JobHandler) {
 // PrepareJob saves new job to database
 func (p *Pool) PrepareJob(job JobHandler) error {
 	if job == nil {
-		return nil
-	}
-	// save job to db if id = 0
-	if job.GetID() == 0 {
-		return job.Save()
+		return errors.New("job is nil")
 	}
 	return nil
 }
@@ -263,22 +269,8 @@ func (p *Pool) updateRetryingJob(job JobHandler) {
 	if job == nil {
 		return
 	}
-	log.Info("process retryable job", "id", job.GetID())
 	if err := job.Update(stores.STATUS_PENDING); err != nil {
 		log.Error("[Pool] failed on updating retrying job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
-		return
-	}
-}
-
-// processSuccessJob updates job's status to `done` to database
-func (p *Pool) processSuccessJob(job JobHandler) {
-	if job == nil {
-		return
-	}
-
-	log.Info("process job success", "id", job.GetID())
-	if err := job.Update(stores.STATUS_DONE); err != nil {
-		log.Error("[Pool] failed on updating success job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
 		return
 	}
 }
@@ -289,7 +281,6 @@ func (p *Pool) processFailedJob(job JobHandler) {
 		return
 	}
 
-	log.Info("process job failed", "id", job.GetID())
 	if err := job.Update(stores.STATUS_FAILED); err != nil {
 		log.Error("[Pool] failed on updating failed job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
 		return
