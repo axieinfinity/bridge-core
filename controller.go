@@ -302,12 +302,14 @@ func (c *Controller) startListening(listener Listener, tryCount int) {
 	}
 
 	// start stats reporter
-	statsTick := time.NewTicker(2 * time.Second)
+	statsTick := time.NewTicker(time.Duration(2) * time.Second)
 	go func() {
-		select {
-		case <-statsTick.C:
-			stats := c.Pool.Stats()
-			log.Info("[Controller] pool stats", "pending", stats.PendingQueue, "queue", stats.Queue)
+		for {
+			select {
+			case <-statsTick.C:
+				stats := c.Pool.Stats()
+				log.Info("[Controller] pool stats", "pending", stats.PendingQueue, "queue", stats.Queue)
+			}
 		}
 	}()
 
@@ -320,6 +322,9 @@ func (c *Controller) startListening(listener Listener, tryCount int) {
 		case <-tick.C:
 			// stop if the pool is closed
 			if c.Pool.IsClosed() {
+				// stop timer
+				tick.Stop()
+				statsTick.Stop()
 				// wait for pool is totally shutdown
 				c.Pool.Wait()
 				return
