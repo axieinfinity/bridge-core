@@ -180,7 +180,6 @@ func (e *BaseJob) Save() error {
 
 func (e *BaseJob) Update(status string) error {
 	job := &models.Job{
-		ID:               int(e.id),
 		Listener:         e.listener.GetName(),
 		SubscriptionName: e.subscriptionName,
 		Type:             e.jobType,
@@ -191,9 +190,11 @@ func (e *BaseJob) Update(status string) error {
 		CreatedAt:        time.Now().Unix(),
 		FromChainId:      hexutil.EncodeBig(e.fromChainID),
 	}
-	if err := e.listener.GetStore().GetJobStore().Update(job); err != nil {
+	if err := e.listener.GetStore().GetJobStore().Save(job); err != nil {
 		return err
 	}
+	e.id = int32(job.ID)
+	e.createdAt = time.Unix(job.CreatedAt, 0)
 	return nil
 }
 
