@@ -16,7 +16,6 @@ type Worker interface {
 	IsClose() bool
 	Channel() chan JobHandler
 	PoolChannel() chan<- JobHandler
-	FailedChannel() chan<- JobHandler
 	WorkersQueue() chan chan JobHandler
 }
 
