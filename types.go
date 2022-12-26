@@ -147,6 +147,9 @@ type TaskHandler interface {
 type Config struct {
 	Listeners       map[string]*LsConfig `json:"listeners"`
 	NumberOfWorkers int                  `json:"numberOfWorkers"`
+	MaxQueueSize    int                  `json:"maxQueueSize"`
+	MaxRetry        int32                `json:"maxRetry"`
+	BackOff         int32                `json:"backoff"`
 	DB              *stores.Database     `json:"database"`
 
 	// this field is used for testing purpose

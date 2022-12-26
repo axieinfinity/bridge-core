@@ -17,6 +17,7 @@ import (
 const (
 	defaultWorkers      = 8182
 	defaultMaxQueueSize = 4096
+	defaultBackoff      = 5
 )
 
 type Stats struct {
@@ -56,12 +57,21 @@ func NewPool(ctx context.Context, cfg *Config, db *gorm.DB, workers []Worker) *P
 	if cfg.NumberOfWorkers <= 0 {
 		cfg.NumberOfWorkers = defaultWorkers
 	}
+	if cfg.MaxQueueSize <= 0 {
+		cfg.MaxQueueSize = defaultMaxQueueSize
+	}
+	if cfg.BackOff <= 0 {
+		cfg.BackOff = defaultBackoff
+	}
+	if cfg.MaxRetry <= 0 {
+		cfg.MaxRetry = defaultMaxRetry
+	}
 	pool := &Pool{
 		ctx:          ctx,
 		cfg:          cfg,
-		MaxRetry:     100,
-		BackOff:      5,
-		MaxQueueSize: defaultMaxQueueSize,
+		MaxRetry:     cfg.MaxRetry,
+		BackOff:      cfg.BackOff,
+		MaxQueueSize: cfg.MaxQueueSize,
 		store:        stores.NewMainStore(db),
 		stop:         make(chan struct{}),
 		isClosed:     atomic.Value{},
@@ -120,7 +130,7 @@ func (p *Pool) startWorker(w Worker) {
 				}
 				continue
 			}
-			log.Info("processing job", "id", job.GetID(), "nextTry", job.GetNextTry(), "retryCount", job.GetRetryCount(), "type", job.GetType())
+			log.Debug("processing job", "id", job.GetID(), "nextTry", job.GetNextTry(), "retryCount", job.GetRetryCount(), "type", job.GetType())
 			if err := w.ProcessJob(job); err != nil {
 				// update try and next retry time
 				if job.GetRetryCount()+1 > job.GetMaxTry() {
@@ -179,7 +189,7 @@ func (p *Pool) Start(closeFunc func()) {
 				}
 				continue
 			}
-			log.Info("[Pool] jobChan received a job", "jobId", job.GetID(), "nextTry", job.GetNextTry(), "type", job.GetType())
+			log.Debug("[Pool] jobChan received a job", "jobId", job.GetID(), "nextTry", job.GetNextTry(), "type", job.GetType())
 			workerCh := <-p.Queue
 			workerCh <- job
 		case <-p.ctx.Done():
