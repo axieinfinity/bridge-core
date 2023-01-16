@@ -163,13 +163,12 @@ func (c *Controller) LoadABIsFromConfig(lsConfig *LsConfig) (err error) {
 
 func (c *Controller) Start() error {
 	go c.Pool.Start(c.closeListeners)
-	go c.processPendingJobs()
+	c.processPendingJobs()
 	c.startListeners()
 	return nil
 }
 
 func (c *Controller) processPendingJobs() {
-	ticker := time.NewTicker(time.Minute)
 	var listeners []string
 	for _, v := range c.listeners {
 		listeners = append(listeners, v.GetName())
@@ -178,54 +177,51 @@ func (c *Controller) processPendingJobs() {
 		return
 	}
 	for {
-		select {
-		case <-ticker.C:
-			jobs, err := c.store.GetJobStore().SearchJobs(&stores.SearchJobs{
-				Status:       stores.STATUS_PENDING,
-				MaxCreatedAt: c.processingFrame,
-				Listeners:    listeners,
-				Limit:        200,
+		jobs, err := c.store.GetJobStore().SearchJobs(&stores.SearchJobs{
+			Status:       stores.STATUS_PENDING,
+			MaxCreatedAt: c.processingFrame,
+			Listeners:    listeners,
+			Limit:        200,
+		})
+		if err != nil {
+			// just log and do nothing.
+			log.Error("[Controller] error while getting pending jobs from database", "err", err)
+		}
+		if len(jobs) == 0 {
+			return
+		}
+		for _, job := range jobs {
+			listener, ok := c.listeners[job.Listener]
+			if !ok || listener.IsDisabled() {
+				continue
+			}
+			if job.Type == CallbackHandler && job.Method == "" {
+				// invalid job, update it to failed
+				job.Status = stores.STATUS_FAILED
+				if err = listener.GetStore().GetJobStore().Update(job); err != nil {
+					log.Error("[Controller] error while updating invalid job", "err", err, "id", job.ID)
+				}
+				continue
+			}
+			ji, err := c.cb.Execute(func() (interface{}, error) {
+				j, err := listener.NewJobFromDB(job)
+				if err != nil {
+					log.Error("[Controller] error while init job from db", "err", err, "jobId", job.ID, "type", job.Type)
+					return nil, err
+				}
+				return j, nil
 			})
-			if err != nil {
-				// just log and do nothing.
-				log.Error("[Controller] error while getting pending jobs from database", "err", err)
+			if err == gobreaker.ErrOpenState {
+				log.Info("Processing pending jobs failed too many times, break")
+				break
 			}
-			if len(jobs) == 0 {
-				return
-			}
-			for _, job := range jobs {
-				listener, ok := c.listeners[job.Listener]
-				if !ok || listener.IsDisabled() {
-					continue
-				}
-				if job.Type == CallbackHandler && job.Method == "" {
-					// invalid job, update it to failed
-					job.Status = stores.STATUS_FAILED
-					if err = listener.GetStore().GetJobStore().Update(job); err != nil {
-						log.Error("[Controller] error while updating invalid job", "err", err, "id", job.ID)
-					}
-					continue
-				}
-				ji, err := c.cb.Execute(func() (interface{}, error) {
-					j, err := listener.NewJobFromDB(job)
-					if err != nil {
-						log.Error("[Controller] error while init job from db", "err", err, "jobId", job.ID, "type", job.Type)
-						return nil, err
-					}
-					return j, nil
-				})
-				if err == gobreaker.ErrOpenState {
-					log.Info("Processing pending jobs failed too many times, break")
-					break
-				}
 
-				j, _ := ji.(JobHandler)
-				// add job to jobChan
-				if j != nil {
-					c.Pool.PrepareJobChan <- j
-					job.Status = stores.STATUS_PROCESSED
-					c.store.GetJobStore().Update(job)
-				}
+			j, _ := ji.(JobHandler)
+			// add job to jobChan
+			if j != nil {
+				c.Pool.PrepareJobChan <- j
+				job.Status = stores.STATUS_PROCESSED
+				c.store.GetJobStore().Update(job)
 			}
 		}
 	}
@@ -308,7 +304,7 @@ func (c *Controller) startListening(listener Listener, tryCount int) {
 			select {
 			case <-statsTick.C:
 				stats := c.Pool.Stats()
-				log.Info("[Controller] pool stats", "pending", stats.PendingQueue, "queue", stats.Queue)
+				log.Info("[Controller] pool stats", "pending", stats.PendingQueue, "queue", stats.Queue, "retryingJob", stats.RetryingJob)
 			}
 		}
 	}()

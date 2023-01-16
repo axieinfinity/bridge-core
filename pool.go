@@ -10,6 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 	"gorm.io/gorm"
 	"runtime/debug"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -23,10 +24,14 @@ const (
 type Stats struct {
 	PendingQueue int
 	Queue        int
+	RetryingJob  int32
 }
 
 type Pool struct {
 	ctx context.Context
+
+	retryableWaitGroup  *sync.WaitGroup
+	numberOfRetryingJob int32
 
 	cfg     *Config
 	Workers []Worker
@@ -67,15 +72,16 @@ func NewPool(ctx context.Context, cfg *Config, db *gorm.DB, workers []Worker) *P
 		cfg.MaxRetry = defaultMaxRetry
 	}
 	pool := &Pool{
-		ctx:          ctx,
-		cfg:          cfg,
-		MaxRetry:     cfg.MaxRetry,
-		BackOff:      cfg.BackOff,
-		MaxQueueSize: cfg.MaxQueueSize,
-		store:        stores.NewMainStore(db),
-		stop:         make(chan struct{}),
-		isClosed:     atomic.Value{},
-		utils:        utils.NewUtils(),
+		ctx:                ctx,
+		cfg:                cfg,
+		MaxRetry:           cfg.MaxRetry,
+		BackOff:            cfg.BackOff,
+		MaxQueueSize:       cfg.MaxQueueSize,
+		store:              stores.NewMainStore(db),
+		stop:               make(chan struct{}),
+		isClosed:           atomic.Value{},
+		utils:              utils.NewUtils(),
+		retryableWaitGroup: &sync.WaitGroup{},
 	}
 
 	pool.isClosed.Store(false)
@@ -239,6 +245,12 @@ func (p *Pool) Start(closeFunc func()) {
 			}
 			log.Info("finish closing pool")
 
+			// wait for all on-fly retryable jobs are inserted to db
+			// prevent negative waitgroup by checking numberOfRetryingJob
+			if atomic.LoadInt32(&p.numberOfRetryingJob) > 0 {
+				p.retryableWaitGroup.Wait()
+			}
+
 			// send signal to stop the program
 			p.stop <- struct{}{}
 			return
@@ -250,6 +262,7 @@ func (p *Pool) Stats() Stats {
 	return Stats{
 		PendingQueue: len(p.PrepareJobChan),
 		Queue:        len(p.JobChan),
+		RetryingJob:  atomic.LoadInt32(&p.numberOfRetryingJob),
 	}
 }
 
@@ -258,11 +271,16 @@ func (p *Pool) PrepareRetryableJob(job JobHandler) {
 	if dur <= 0 {
 		return
 	}
+	atomic.AddInt32(&p.numberOfRetryingJob, 1)
+	p.retryableWaitGroup.Add(1)
 	timer := time.NewTimer(dur)
 	select {
 	case <-timer.C:
 		p.PrepareJobChan <- job
+		p.retryableWaitGroup.Done()
+		atomic.AddInt32(&p.numberOfRetryingJob, -1)
 	case <-p.ctx.Done():
+		log.Info("pool closed, update retrying job to database")
 		p.updateRetryingJob(job)
 	}
 }
@@ -276,6 +294,10 @@ func (p *Pool) PrepareJob(job JobHandler) error {
 }
 
 func (p *Pool) updateRetryingJob(job JobHandler) {
+	defer func() {
+		p.retryableWaitGroup.Done()
+		atomic.AddInt32(&p.numberOfRetryingJob, 1)
+	}()
 	if job == nil {
 		return
 	}
