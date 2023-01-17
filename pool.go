@@ -273,12 +273,16 @@ func (p *Pool) PrepareRetryableJob(job JobHandler) {
 	}
 	atomic.AddInt32(&p.numberOfRetryingJob, 1)
 	p.retryableWaitGroup.Add(1)
+
+	defer func() {
+		p.retryableWaitGroup.Done()
+		atomic.AddInt32(&p.numberOfRetryingJob, -1)
+	}()
+
 	timer := time.NewTimer(dur)
 	select {
 	case <-timer.C:
 		p.PrepareJobChan <- job
-		p.retryableWaitGroup.Done()
-		atomic.AddInt32(&p.numberOfRetryingJob, -1)
 	case <-p.ctx.Done():
 		log.Info("pool closed, update retrying job to database")
 		p.updateRetryingJob(job)
@@ -294,10 +298,6 @@ func (p *Pool) PrepareJob(job JobHandler) error {
 }
 
 func (p *Pool) updateRetryingJob(job JobHandler) {
-	defer func() {
-		p.retryableWaitGroup.Done()
-		atomic.AddInt32(&p.numberOfRetryingJob, 1)
-	}()
 	if job == nil {
 		return
 	}
