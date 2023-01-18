@@ -29,6 +29,7 @@ type Stats struct {
 type Pool struct {
 	ctx context.Context
 
+	lock                sync.Mutex
 	retryableWaitGroup  *sync.WaitGroup
 	numberOfRetryingJob int32
 
@@ -153,7 +154,20 @@ func (p *Pool) startWorker(w Worker) {
 	}
 }
 
+func (p *Pool) closedChannelRecover(cb func()) {
+	if r := recover(); r != nil {
+		if err, ok := r.(error); ok && err.Error() == "send on closed channel" {
+			cb()
+			return
+		}
+		log.Error("recover from panic", "message", r, "trace", string(debug.Stack()))
+	}
+}
+
 func (p *Pool) RetryJob(job JobHandler) {
+	defer p.closedChannelRecover(func() {
+		p.updateRetryingJob(job)
+	})
 	if job == nil {
 		return
 	}
@@ -165,6 +179,9 @@ func (p *Pool) RetryJob(job JobHandler) {
 }
 
 func (p *Pool) Enqueue(job JobHandler) {
+	defer p.closedChannelRecover(func() {
+		p.updateRetryingJob(job)
+	})
 	if job == nil {
 		return
 	}
@@ -237,10 +254,7 @@ func (p *Pool) Start(closeFunc func()) {
 			log.Info("finish closing pool")
 
 			// wait for all on-fly retryable jobs are inserted to db
-			// prevent negative waitgroup by checking numberOfRetryingJob
-			if atomic.LoadInt32(&p.numberOfRetryingJob) > 0 {
-				p.retryableWaitGroup.Wait()
-			}
+			p.retryableWaitGroup.Wait()
 
 			// send signal to stop the program
 			close(p.stop)
@@ -258,6 +272,11 @@ func (p *Pool) Stats() Stats {
 }
 
 func (p *Pool) PrepareRetryableJob(job JobHandler) {
+	// if pool is closed, try update job to db
+	if p.isClosed.Load().(bool) {
+		log.Info("pool closed, update retrying job to database")
+		p.updateRetryingJob(job)
+	}
 	dur := time.Until(time.Unix(job.GetNextTry(), 0))
 	if dur <= 0 {
 		return
@@ -284,6 +303,10 @@ func (p *Pool) updateRetryingJob(job JobHandler) {
 	if job == nil {
 		return
 	}
+
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
 	if err := job.Update(stores.STATUS_PENDING); err != nil {
 		log.Error("[Pool] failed on updating retrying job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
 		return
@@ -295,6 +318,9 @@ func (p *Pool) processFailedJob(job JobHandler) {
 	if job == nil {
 		return
 	}
+
+	p.lock.Lock()
+	defer p.lock.Unlock()
 
 	if err := job.Update(stores.STATUS_FAILED); err != nil {
 		log.Error("[Pool] failed on updating failed job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())

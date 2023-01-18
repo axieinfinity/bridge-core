@@ -186,7 +186,6 @@ func (c *Controller) processPendingJobs() {
 			log.Error("[Controller] error while getting pending jobs from database", "err", err)
 		}
 		if len(jobs) == 0 {
-			log.Info("no job found in db")
 			return
 		}
 		for _, job := range jobs {
