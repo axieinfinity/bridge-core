@@ -15,8 +15,6 @@ type Worker interface {
 	ProcessJob(job JobHandler) error
 	IsClose() bool
 	Channel() chan JobHandler
-	PoolChannel() chan<- JobHandler
-	WorkersQueue() chan chan JobHandler
 }
 
 type BridgeWorker struct {
@@ -42,14 +40,11 @@ type BridgeWorker struct {
 	isClose   int32
 }
 
-func NewWorker(ctx context.Context, id int, mainChan, failedChan chan<- JobHandler, queue chan chan JobHandler, size int, listeners map[string]Listener) *BridgeWorker {
+func NewWorker(ctx context.Context, id int, size int, listeners map[string]Listener) *BridgeWorker {
 	return &BridgeWorker{
 		ctx:         ctx,
 		id:          id,
 		workerChan:  make(chan JobHandler, size),
-		mainChan:    mainChan,
-		failedChan:  failedChan,
-		queue:       queue,
 		listeners:   listeners,
 		utilWrapper: utils.NewUtils(),
 	}
@@ -81,18 +76,6 @@ func (w *BridgeWorker) IsClose() bool {
 
 func (w *BridgeWorker) Channel() chan JobHandler {
 	return w.workerChan
-}
-
-func (w *BridgeWorker) WorkersQueue() chan chan JobHandler {
-	return w.queue
-}
-
-func (w *BridgeWorker) PoolChannel() chan<- JobHandler {
-	return w.mainChan
-}
-
-func (w *BridgeWorker) FailedChannel() chan<- JobHandler {
-	return w.failedChan
 }
 
 func (w *BridgeWorker) Close() {

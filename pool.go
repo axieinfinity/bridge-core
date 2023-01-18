@@ -2,7 +2,6 @@ package bridge_core
 
 import (
 	"context"
-	"errors"
 	"github.com/axieinfinity/bridge-core/adapters"
 	"github.com/axieinfinity/bridge-core/metrics"
 	"github.com/axieinfinity/bridge-core/stores"
@@ -22,9 +21,9 @@ const (
 )
 
 type Stats struct {
-	PendingQueue int
-	Queue        int
-	RetryingJob  int32
+	RetryableQueue int
+	Queue          int
+	RetryingJob    int32
 }
 
 type Pool struct {
@@ -44,10 +43,9 @@ type Pool struct {
 	Queue chan chan JobHandler
 
 	// JobChan receives new job
-	JobChan        chan JobHandler
-	RetryJobChan   chan JobHandler
-	FailedJobChan  chan JobHandler
-	PrepareJobChan chan JobHandler
+	JobChan       chan JobHandler
+	RetryJobChan  chan JobHandler
+	FailedJobChan chan JobHandler
 
 	jobId        int32
 	MaxQueueSize int
@@ -86,7 +84,6 @@ func NewPool(ctx context.Context, cfg *Config, db *gorm.DB, workers []Worker) *P
 
 	pool.isClosed.Store(false)
 	pool.JobChan = make(chan JobHandler, pool.MaxQueueSize*cfg.NumberOfWorkers)
-	pool.PrepareJobChan = make(chan JobHandler, pool.MaxQueueSize)
 	pool.FailedJobChan = make(chan JobHandler, pool.MaxQueueSize)
 	pool.RetryJobChan = make(chan JobHandler, pool.MaxQueueSize)
 	pool.Queue = make(chan chan JobHandler, pool.MaxQueueSize)
@@ -123,7 +120,7 @@ func (p *Pool) startWorker(w Worker) {
 	}()
 	for {
 		// push worker chan into queue if worker has not closed yet
-		w.WorkersQueue() <- w.Channel()
+		p.Queue <- w.Channel()
 		select {
 		case job := <-w.Channel():
 			if job == nil {
@@ -147,13 +144,35 @@ func (p *Pool) startWorker(w Worker) {
 				job.IncreaseRetryCount()
 				job.UpdateNextTry(time.Now().Unix() + int64(job.GetRetryCount()*job.GetBackOff()))
 				// send to retry job chan
-				p.RetryJobChan <- job
+				p.RetryJob(job)
 			}
 		case <-w.Context().Done():
 			w.Close()
 			return
 		}
 	}
+}
+
+func (p *Pool) RetryJob(job JobHandler) {
+	if job == nil {
+		return
+	}
+	for len(p.RetryJobChan) == p.cfg.MaxQueueSize {
+		log.Info("[Pool] RetryJobChan is full...")
+		time.Sleep(time.Second)
+	}
+	p.RetryJobChan <- job
+}
+
+func (p *Pool) Enqueue(job JobHandler) {
+	if job == nil {
+		return
+	}
+	for len(p.JobChan) == (p.cfg.MaxQueueSize * p.cfg.NumberOfWorkers) {
+		log.Info("[Pool] JobChan is full...")
+		time.Sleep(time.Second)
+	}
+	p.JobChan <- job
 }
 
 func (p *Pool) Start(closeFunc func()) {
@@ -169,22 +188,6 @@ func (p *Pool) Start(closeFunc func()) {
 			p.processFailedJob(job)
 		case job := <-p.RetryJobChan:
 			go p.PrepareRetryableJob(job)
-		case job := <-p.PrepareJobChan:
-			if job == nil {
-				continue
-			}
-			// add new job to database before processing
-			if err := p.PrepareJob(job); err != nil {
-				log.Error("[Pool] failed on preparing job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
-				continue
-			}
-			if p.isClosed.Load().(bool) {
-				if err := job.Update(stores.STATUS_PENDING); err != nil {
-					log.Error("[Pool] failed on saving pending job", "err", err, "jobType", job.GetType())
-				}
-				continue
-			}
-			p.JobChan <- job
 		case job := <-p.JobChan:
 			if job == nil {
 				continue
@@ -208,22 +211,10 @@ func (p *Pool) Start(closeFunc func()) {
 			}
 
 			// close all available channels to prevent further data send to pool's channels
-			close(p.PrepareJobChan)
 			close(p.JobChan)
 			close(p.FailedJobChan)
 			close(p.RetryJobChan)
 			close(p.Queue)
-
-			// loop through all channels to store all left-over data to db
-			for {
-				job, more := <-p.PrepareJobChan
-				if !more {
-					break
-				}
-				if err := job.Update(stores.STATUS_PENDING); err != nil {
-					log.Error("[Pool] failed on updating failed job", "err", err, "jobType", job.GetType())
-				}
-			}
 
 			for {
 				log.Info("checking retrying jobs")
@@ -252,7 +243,7 @@ func (p *Pool) Start(closeFunc func()) {
 			}
 
 			// send signal to stop the program
-			p.stop <- struct{}{}
+			close(p.stop)
 			return
 		}
 	}
@@ -260,9 +251,9 @@ func (p *Pool) Start(closeFunc func()) {
 
 func (p *Pool) Stats() Stats {
 	return Stats{
-		PendingQueue: len(p.PrepareJobChan),
-		Queue:        len(p.JobChan),
-		RetryingJob:  atomic.LoadInt32(&p.numberOfRetryingJob),
+		RetryableQueue: len(p.RetryJobChan),
+		Queue:          len(p.JobChan),
+		RetryingJob:    atomic.LoadInt32(&p.numberOfRetryingJob),
 	}
 }
 
@@ -282,19 +273,11 @@ func (p *Pool) PrepareRetryableJob(job JobHandler) {
 	timer := time.NewTimer(dur)
 	select {
 	case <-timer.C:
-		p.PrepareJobChan <- job
+		p.Enqueue(job)
 	case <-p.ctx.Done():
 		log.Info("pool closed, update retrying job to database")
 		p.updateRetryingJob(job)
 	}
-}
-
-// PrepareJob saves new job to database
-func (p *Pool) PrepareJob(job JobHandler) error {
-	if job == nil {
-		return errors.New("job is nil")
-	}
-	return nil
 }
 
 func (p *Pool) updateRetryingJob(job JobHandler) {

@@ -28,13 +28,13 @@ const (
 	defaultTaskInterval = 3
 )
 
-var listeners map[string]func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore, helpers utils.Utils) Listener
+var listeners map[string]func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore, helpers utils.Utils, pool *Pool) Listener
 
 func init() {
-	listeners = make(map[string]func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore, helpers utils.Utils) Listener)
+	listeners = make(map[string]func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore, helpers utils.Utils, pool *Pool) Listener)
 }
 
-func AddListener(name string, initFunc func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore, helpers utils.Utils) Listener) {
+func AddListener(name string, initFunc func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore, helpers utils.Utils, pool *Pool) Listener) {
 	listeners[name] = initFunc
 }
 
@@ -110,12 +110,10 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 		if !ok {
 			continue
 		}
-		l := initFunc(c.ctx, lsConfig, c.store, c.utilWrapper)
+		l := initFunc(c.ctx, lsConfig, c.store, c.utilWrapper, c.Pool)
 		if l == nil {
 			return nil, errors.New("listener is nil")
 		}
-		// set prepare job chan to listener
-		l.SetPrepareJobChan(c.Pool.PrepareJobChan)
 
 		// set listeners to listeners
 		l.AddListeners(c.listeners)
@@ -139,7 +137,7 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 	var workers []Worker
 	// init workers
 	for i := 0; i < cfg.NumberOfWorkers; i++ {
-		w := NewWorker(ctx, i, c.Pool.PrepareJobChan, c.Pool.FailedJobChan, c.Pool.Queue, c.Pool.MaxQueueSize, c.listeners)
+		w := NewWorker(ctx, i, c.Pool.MaxQueueSize, c.listeners)
 		workers = append(workers, w)
 	}
 	c.Pool.AddWorkers(workers)
@@ -188,6 +186,7 @@ func (c *Controller) processPendingJobs() {
 			log.Error("[Controller] error while getting pending jobs from database", "err", err)
 		}
 		if len(jobs) == 0 {
+			log.Info("no job found in db")
 			return
 		}
 		for _, job := range jobs {
@@ -219,7 +218,7 @@ func (c *Controller) processPendingJobs() {
 			j, _ := ji.(JobHandler)
 			// add job to jobChan
 			if j != nil {
-				c.Pool.PrepareJobChan <- j
+				c.Pool.Enqueue(j)
 				job.Status = stores.STATUS_PROCESSED
 				c.store.GetJobStore().Update(job)
 			}
@@ -304,7 +303,7 @@ func (c *Controller) startListening(listener Listener, tryCount int) {
 			select {
 			case <-statsTick.C:
 				stats := c.Pool.Stats()
-				log.Info("[Controller] pool stats", "pending", stats.PendingQueue, "queue", stats.Queue, "retryingJob", stats.RetryingJob)
+				log.Info("[Controller] pool stats", "retry", stats.RetryableQueue, "queue", stats.Queue, "retryingJob", stats.RetryingJob)
 			}
 		}
 	}()
@@ -447,15 +446,7 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 			}
 			name := eventIds[eventId]
 			tx := NewEmptyTransaction(chainId, eventLog.TxHash, eventLog.Data, nil, &eventLog.Address)
-			if job := listener.GetListenHandleJob(name, tx, eventId.Hex(), data); job != nil {
-				if err := c.Pool.PrepareJob(job); err != nil {
-					log.Error("[Controller] failed on preparing job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
-					metrics.Pusher.IncrCounter(metrics.PreparingFailedJobMetric, 1)
-					continue
-				}
-				metrics.Pusher.IncrCounter(metrics.PreparingSuccessJobMetric, 1)
-				c.Pool.JobChan <- job
-			}
+			c.Pool.Enqueue(listener.GetListenHandleJob(name, tx, eventId.Hex(), data))
 		}
 		block, _ := listener.GetBlock(fromHeight)
 		listener.UpdateCurrentBlock(block)
@@ -480,7 +471,7 @@ func (c *Controller) processTxs(listener Listener, txs []Transaction) {
 			eventId := tx.GetData()[0:4]
 			data := tx.GetData()[4:]
 			if job := listener.GetListenHandleJob(name, tx, common.Bytes2Hex(eventId), data); job != nil {
-				c.Pool.PrepareJobChan <- job
+				c.Pool.Enqueue(job)
 			}
 		}
 	}
