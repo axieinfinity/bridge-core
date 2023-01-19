@@ -204,6 +204,8 @@ func (p *Pool) Start(closeFunc func()) {
 		case job := <-p.FailedJobChan:
 			p.processFailedJob(job)
 		case job := <-p.RetryJobChan:
+			atomic.AddInt32(&p.numberOfRetryingJob, 1)
+			p.retryableWaitGroup.Add(1)
 			go p.PrepareRetryableJob(job)
 		case job := <-p.JobChan:
 			if job == nil {
@@ -281,8 +283,6 @@ func (p *Pool) PrepareRetryableJob(job JobHandler) {
 	if dur <= 0 {
 		return
 	}
-	atomic.AddInt32(&p.numberOfRetryingJob, 1)
-	p.retryableWaitGroup.Add(1)
 
 	defer func() {
 		p.retryableWaitGroup.Done()
