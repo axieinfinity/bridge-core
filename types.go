@@ -65,7 +65,6 @@ type Listener interface {
 	AddTask(handler TaskHandler)
 
 	IsUpTodate() bool
-	SetPrepareJobChan(chan JobHandler)
 
 	GetValidatorSign() utils.ISign
 	GetVoterSign() utils.ISign

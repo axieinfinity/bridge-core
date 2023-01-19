@@ -3,7 +3,6 @@ package bridge_core
 import (
 	"context"
 	"fmt"
-	"github.com/axieinfinity/bridge-core/utils"
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/go-stack/stack"
 	"sync/atomic"
@@ -15,43 +14,23 @@ type Worker interface {
 	ProcessJob(job JobHandler) error
 	IsClose() bool
 	Channel() chan JobHandler
-	PoolChannel() chan<- JobHandler
-	WorkersQueue() chan chan JobHandler
 }
 
 type BridgeWorker struct {
 	ctx context.Context
-
-	utilWrapper utils.Utils
-
-	id int
-
-	// queue is passed from subscriber is used to add workerChan to queue
-	queue chan chan JobHandler
-
-	// mainChain is controller's jobChan which is used to push job back to controller
-	mainChan chan<- JobHandler
-
+	id  int
 	// workerChan is used to receive and process job
 	workerChan chan JobHandler
-
-	failedChan  chan<- JobHandler
-	successChan chan<- JobHandler
-
-	listeners map[string]Listener
-	isClose   int32
+	listeners  map[string]Listener
+	isClose    int32
 }
 
-func NewWorker(ctx context.Context, id int, mainChan, failedChan chan<- JobHandler, queue chan chan JobHandler, size int, listeners map[string]Listener) *BridgeWorker {
+func NewWorker(ctx context.Context, id int, size int, listeners map[string]Listener) *BridgeWorker {
 	return &BridgeWorker{
-		ctx:         ctx,
-		id:          id,
-		workerChan:  make(chan JobHandler, size),
-		mainChan:    mainChan,
-		failedChan:  failedChan,
-		queue:       queue,
-		listeners:   listeners,
-		utilWrapper: utils.NewUtils(),
+		ctx:        ctx,
+		id:         id,
+		workerChan: make(chan JobHandler, size),
+		listeners:  listeners,
 	}
 }
 
@@ -81,18 +60,6 @@ func (w *BridgeWorker) IsClose() bool {
 
 func (w *BridgeWorker) Channel() chan JobHandler {
 	return w.workerChan
-}
-
-func (w *BridgeWorker) WorkersQueue() chan chan JobHandler {
-	return w.queue
-}
-
-func (w *BridgeWorker) PoolChannel() chan<- JobHandler {
-	return w.mainChan
-}
-
-func (w *BridgeWorker) FailedChannel() chan<- JobHandler {
-	return w.failedChan
 }
 
 func (w *BridgeWorker) Close() {

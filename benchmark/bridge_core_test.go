@@ -12,11 +12,14 @@ import (
 	"math/rand"
 	"os"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
 
-var testData = make([]string, 0)
+var (
+	testData = make([]string, 0)
+)
 
 func init() {
 	dataLength, _ := strconv.Atoi(os.Getenv("size"))
@@ -35,10 +38,12 @@ type Job struct {
 	nextTry    int64
 	backOff    int
 
+	counter *Counter
+
 	data []byte
 }
 
-func NewJob(id int32, store stores.MainStore, data []byte) *Job {
+func NewJob(id int32, store stores.MainStore, data []byte, counter *Counter) *Job {
 	return &Job{
 		id:         id,
 		retryCount: 0,
@@ -46,6 +51,7 @@ func NewJob(id int32, store stores.MainStore, data []byte) *Job {
 		backOff:    5,
 		store:      store,
 		data:       data,
+		counter:    counter,
 	}
 }
 
@@ -86,6 +92,7 @@ func (e *Job) GetBackOff() int {
 }
 
 func (e *Job) Process() ([]byte, error) {
+	atomic.AddInt32(&e.counter.counter, 1)
 	return nil, nil
 }
 
@@ -117,21 +124,6 @@ func (e *Job) GetTransaction() bridge_core.Transaction {
 }
 
 func (e *Job) Save() error {
-	//job := &models.Job{
-	//	Listener:         "",
-	//	SubscriptionName: e.GetSubscriptionName(),
-	//	Type:             e.GetType(),
-	//	RetryCount:       e.retryCount,
-	//	Status:           stores.STATUS_PENDING,
-	//	Data:             common.Bytes2Hex(e.GetData()),
-	//	Transaction:      "",
-	//	CreatedAt:        time.Now().Unix(),
-	//	FromChainId:      "",
-	//}
-	//if err := e.store.GetJobStore().Save(job); err != nil {
-	//	return err
-	//}
-	//e.id = int32(job.ID)
 	return nil
 }
 
@@ -162,10 +154,50 @@ func (e *Job) CreatedAt() time.Time {
 	return time.Now()
 }
 
+type Counter struct {
+	ctx     context.Context
+	cancel  context.CancelFunc
+	data    []string
+	counter int32
+	pool    *bridge_core.Pool
+	db      *gorm.DB
+}
+
+func newCounter() *Counter {
+	dbCfg := &stores.Database{}
+	// init db based on config
+	db, err := stores.MustConnectDatabase(dbCfg, true)
+	if err != nil {
+		panic(err)
+	}
+	db.AutoMigrate(&models.Job{})
+	ctx, cancel := context.WithCancel(context.Background())
+	pool := newPool(ctx, db, 8192)
+	c := &Counter{ctx: ctx, cancel: cancel, data: testData, counter: 0, pool: pool, db: db}
+	go c.pool.Start(nil)
+	return c
+}
+
+func (c *Counter) start() {
+	store := stores.NewMainStore(c.db)
+	now := time.Now()
+	for _, data := range c.data {
+		c.pool.Enqueue(NewJob(0, store, []byte(data), c))
+	}
+	for {
+		if atomic.LoadInt32(&c.counter) >= int32(len(c.data)) {
+			c.cancel()
+			c.pool.Wait()
+			break
+		}
+	}
+	println(fmt.Sprintf("total time: %d (ms)", time.Now().Sub(now).Milliseconds()))
+}
+
 func addWorkers(ctx context.Context, pool *bridge_core.Pool, cfg *bridge_core.Config) {
 	var workers []bridge_core.Worker
 	for i := 0; i < cfg.NumberOfWorkers; i++ {
-		workers = append(workers, bridge_core.NewWorker(ctx, i, pool.PrepareJobChan, pool.FailedJobChan, pool.Queue, pool.MaxQueueSize, nil))
+		workers = append(workers, bridge_core.NewWorker(ctx, i, pool.MaxQueueSize, nil))
 	}
 	pool.AddWorkers(workers)
 }
@@ -178,37 +210,5 @@ func newPool(ctx context.Context, db *gorm.DB, numberOfWorkers int) *bridge_core
 }
 
 func BenchmarkPool(b *testing.B) {
-	dbCfg := &stores.Database{
-		Host:            "localhost",
-		User:            "postgres",
-		Password:        "example",
-		DBName:          "bench_mark_db",
-		Port:            5432,
-		ConnMaxLifetime: 200,
-		MaxIdleConns:    200,
-		MaxOpenConns:    200,
-	}
-	// init db based on config
-	db, err := stores.MustConnectDatabase(dbCfg, false)
-	if err != nil {
-		panic(err)
-	}
-	db.AutoMigrate(&models.Job{})
-	ctx, cancel := context.WithCancel(context.Background())
-	pool := newPool(ctx, db, 8192)
-	go pool.Start(nil)
-
-	store := stores.NewMainStore(db)
-	now := time.Now()
-	for _, data := range testData {
-		pool.PrepareJobChan <- NewJob(0, store, []byte(data))
-	}
-	for {
-		if len(pool.PrepareJobChan) == 0 && len(pool.JobChan) == 0 && len(pool.FailedJobChan) == 0 && len(pool.RetryJobChan) == 0 {
-			cancel()
-			pool.Wait()
-			break
-		}
-	}
-	println(fmt.Sprintf("total time: %d (ms)", time.Now().Sub(now).Milliseconds()))
+	newCounter().start()
 }
