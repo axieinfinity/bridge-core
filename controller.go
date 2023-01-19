@@ -430,11 +430,11 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 			retry++
 			continue
 		}
-		log.Info("[Controller][processBatchLogs] finish getting logs", "from", opts.Start, "to", *opts.End, "logs", len(logs), "listener", listener.GetName())
+		log.Trace("[Controller][processBatchLogs] finish getting logs", "from", opts.Start, "to", *opts.End, "logs", len(logs), "listener", listener.GetName())
 		fromHeight = *opts.End + 1
 		for i, eventLog := range logs {
 			eventId := eventLog.Topics[0]
-			log.Info("[Controller][processBatchLogs] processing log", "topic", eventLog.Topics[0].Hex(), "address", eventLog.Address.Hex(), "transaction", eventLog.TxHash.Hex(), "listener", listener.GetName())
+			log.Trace("[Controller][processBatchLogs] processing log", "topic", eventLog.Topics[0].Hex(), "address", eventLog.Address.Hex(), "transaction", eventLog.TxHash.Hex(), "listener", listener.GetName())
 			if _, ok := eventIds[eventId]; !ok {
 				continue
 			}
