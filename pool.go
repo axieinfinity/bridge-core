@@ -192,6 +192,16 @@ func (p *Pool) Enqueue(job JobHandler) {
 	p.JobChan <- job
 }
 
+func (p *Pool) SendJobToWorker(workerCh chan JobHandler, job JobHandler) {
+	defer p.closedChannelRecover(func() {
+		p.updateRetryingJob(job)
+	})
+	if job == nil {
+		return
+	}
+	workerCh <- job
+}
+
 func (p *Pool) Start(closeFunc func()) {
 	if p.Workers == nil {
 		panic("workers list is empty")
@@ -219,7 +229,7 @@ func (p *Pool) Start(closeFunc func()) {
 			}
 			log.Debug("[Pool] jobChan received a job", "jobId", job.GetID(), "nextTry", job.GetNextTry(), "type", job.GetType())
 			workerCh := <-p.Queue
-			workerCh <- job
+			p.SendJobToWorker(workerCh, job)
 		case <-p.ctx.Done():
 			log.Info("closing pool...")
 			p.isClosed.Store(true)
