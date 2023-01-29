@@ -175,6 +175,13 @@ func (c *Controller) processPendingJobs() {
 		return
 	}
 	for {
+		// stop processing if controller is closed
+		select {
+		case <-c.ctx.Done():
+			return
+		default:
+			// do nothing
+		}
 		jobs, err := c.store.GetJobStore().SearchJobs(&stores.SearchJobs{
 			Status:       stores.STATUS_PENDING,
 			MaxCreatedAt: c.processingFrame,
@@ -312,6 +319,7 @@ func (c *Controller) startListening(listener Listener, tryCount int) {
 	for {
 		select {
 		case <-listener.Context().Done():
+			listener.SaveCurrentBlockToDB()
 			return
 		case <-tick.C:
 			// stop if the pool is closed
@@ -431,7 +439,7 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 			continue
 		}
 		log.Trace("[Controller][processBatchLogs] finish getting logs", "from", opts.Start, "to", *opts.End, "logs", len(logs), "listener", listener.GetName())
-		fromHeight = *opts.End + 1
+		processedBlock := make(map[uint64]struct{})
 		for i, eventLog := range logs {
 			eventId := eventLog.Topics[0]
 			log.Trace("[Controller][processBatchLogs] processing log", "topic", eventLog.Topics[0].Hex(), "address", eventLog.Address.Hex(), "transaction", eventLog.TxHash.Hex(), "listener", listener.GetName())
@@ -446,9 +454,18 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 			name := eventIds[eventId]
 			tx := NewEmptyTransaction(chainId, eventLog.TxHash, eventLog.Data, nil, &eventLog.Address)
 			c.Pool.Enqueue(listener.GetListenHandleJob(name, tx, eventId.Hex(), data))
+			// update and cache block number within log
+			if _, ok := processedBlock[eventLog.BlockNumber]; !ok {
+				block, _ := listener.GetBlock(eventLog.BlockNumber)
+				listener.UpdateCurrentBlock(block)
+			}
+			processedBlock[eventLog.BlockNumber] = struct{}{}
 		}
+		// update from height, and also update again from height's block
+		fromHeight = *opts.End + 1
 		block, _ := listener.GetBlock(fromHeight)
 		listener.UpdateCurrentBlock(block)
+		listener.SaveCurrentBlockToDB()
 	}
 	return fromHeight
 }

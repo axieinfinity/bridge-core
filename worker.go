@@ -41,7 +41,7 @@ func (w *BridgeWorker) String() string {
 func (w *BridgeWorker) ProcessJob(job JobHandler) error {
 	val, err := job.Process()
 	if err != nil {
-		log.Error("[BridgeWorker] failed while processing job", "id", job.GetID(), "err", err, "stack", stack.Trace().String())
+		log.Error("[BridgeWorker] failed while processing job", "retry", job.GetRetryCount(), "err", err, "stack", stack.Trace().String())
 		return err
 	}
 	if job.GetType() == ListenHandler && job.GetSubscriptionName() != "" {
