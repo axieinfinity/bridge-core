@@ -74,6 +74,7 @@ type Listener interface {
 
 	// GetListener returns listener by name
 	GetListener(string) Listener
+	CacheBlocks(blockNumbers map[uint64]struct{})
 }
 
 type Transaction interface {

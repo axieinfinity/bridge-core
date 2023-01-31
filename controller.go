@@ -439,7 +439,8 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 			continue
 		}
 		log.Trace("[Controller][processBatchLogs] finish getting logs", "from", opts.Start, "to", *opts.End, "logs", len(logs), "listener", listener.GetName())
-		processedBlock := make(map[uint64]struct{})
+		processedBlocks := make(map[uint64]struct{})
+		jobs := make([]JobHandler, 0)
 		for i, eventLog := range logs {
 			eventId := eventLog.Topics[0]
 			log.Trace("[Controller][processBatchLogs] processing log", "topic", eventLog.Topics[0].Hex(), "address", eventLog.Address.Hex(), "transaction", eventLog.TxHash.Hex(), "listener", listener.GetName())
@@ -451,16 +452,19 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 				log.Error("[Controller] error while marshalling log", "err", err, "transaction", eventLog.TxHash.Hex(), "index", i)
 				continue
 			}
+			processedBlocks[eventLog.BlockNumber] = struct{}{}
 			name := eventIds[eventId]
 			tx := NewEmptyTransaction(chainId, eventLog.TxHash, eventLog.Data, nil, &eventLog.Address)
-			c.Pool.Enqueue(listener.GetListenHandleJob(name, tx, eventId.Hex(), data))
-			// update and cache block number within log
-			if _, ok := processedBlock[eventLog.BlockNumber]; !ok {
-				block, _ := listener.GetBlock(eventLog.BlockNumber)
-				listener.UpdateCurrentBlock(block)
-			}
-			processedBlock[eventLog.BlockNumber] = struct{}{}
+			jobs = append(jobs, listener.GetListenHandleJob(name, tx, eventId.Hex(), data))
 		}
+		// cache processedBlocks and processedTxs
+		listener.CacheBlocks(processedBlocks)
+
+		// loop through all JobHandler and enqueue them
+		for _, job := range jobs {
+			c.Pool.Enqueue(job)
+		}
+
 		// update from height, and also update again from height's block
 		fromHeight = *opts.End + 1
 		block, _ := listener.GetBlock(fromHeight)
