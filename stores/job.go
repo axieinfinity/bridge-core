@@ -23,7 +23,7 @@ func NewJobStore(db *gorm.DB) *jobStore {
 }
 
 func (j *jobStore) Save(job *models.Job) error {
-	return j.Create(job).Error
+	return j.DB.Save(job).Error
 }
 
 func (j *jobStore) Update(job *models.Job) error {

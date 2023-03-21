@@ -130,8 +130,7 @@ type JobHandler interface {
 
 	FromChainID() *big.Int
 
-	Save() error
-	Update(string) error
+	Save(string) error
 
 	CreatedAt() time.Time
 	String() string

@@ -2,16 +2,17 @@ package bridge_core
 
 import (
 	"context"
+	"runtime/debug"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/axieinfinity/bridge-core/adapters"
 	"github.com/axieinfinity/bridge-core/metrics"
 	"github.com/axieinfinity/bridge-core/stores"
 	"github.com/axieinfinity/bridge-core/utils"
 	"github.com/ethereum/go-ethereum/log"
 	"gorm.io/gorm"
-	"runtime/debug"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 const (
@@ -129,7 +130,7 @@ func (p *Pool) startWorker(w Worker) {
 			}
 			if p.isClosed.Load().(bool) {
 				// update job to db
-				if err := job.Update(stores.STATUS_PENDING); err != nil {
+				if err := job.Save(stores.STATUS_PENDING); err != nil {
 					log.Error("[Pool] failed on updating failed job", "err", err, "jobType", job.GetType())
 				}
 				continue
@@ -166,7 +167,7 @@ func (p *Pool) closedChannelRecover(cb func()) {
 
 func (p *Pool) RetryJob(job JobHandler) {
 	defer p.closedChannelRecover(func() {
-		p.updateRetryingJob(job)
+		p.saveJob(job)
 	})
 	if job == nil {
 		return
@@ -180,7 +181,7 @@ func (p *Pool) RetryJob(job JobHandler) {
 
 func (p *Pool) Enqueue(job JobHandler) {
 	defer p.closedChannelRecover(func() {
-		p.updateRetryingJob(job)
+		p.saveJob(job)
 	})
 	if job == nil {
 		return
@@ -194,7 +195,7 @@ func (p *Pool) Enqueue(job JobHandler) {
 
 func (p *Pool) SendJobToWorker(workerCh chan JobHandler, job JobHandler) {
 	defer p.closedChannelRecover(func() {
-		p.updateRetryingJob(job)
+		p.saveJob(job)
 	})
 	if job == nil {
 		return
@@ -222,7 +223,7 @@ func (p *Pool) Start(closeFunc func()) {
 				continue
 			}
 			if p.isClosed.Load().(bool) {
-				if err := job.Update(stores.STATUS_PENDING); err != nil {
+				if err := job.Save(stores.STATUS_PENDING); err != nil {
 					log.Error("[Pool] failed on saving processing job", "err", err, "jobType", job.GetType())
 				}
 				continue
@@ -239,31 +240,47 @@ func (p *Pool) Start(closeFunc func()) {
 				closeFunc()
 			}
 
+			// wait for all worker finish their close
+			for _, worker := range p.Workers {
+				worker.Wait()
+			}
+
 			// close all available channels to prevent further data send to pool's channels
 			close(p.JobChan)
 			close(p.FailedJobChan)
 			close(p.RetryJobChan)
 			close(p.Queue)
 
+			log.Info("Saving unprocessed jobs.", "jobs", len(p.JobChan))
 			for {
-				log.Info("checking retrying jobs")
+				job, more := <-p.JobChan
+				if !more {
+					break
+				}
+				// update job
+				p.saveJob(job)
+			}
+
+			log.Info("Saving unprocessed retry jobs.", "jobs", len(p.RetryJobChan))
+			for {
 				job, more := <-p.RetryJobChan
 				if !more {
 					break
 				}
 				// update job
-				p.updateRetryingJob(job)
+				p.saveJob(job)
 			}
 
+			log.Info("Saving unprocessed fail jobs.", "jobs", len(p.FailedJobChan))
 			for {
-				log.Info("checking failedJobChan")
 				job, more := <-p.FailedJobChan
 				if !more {
 					break
 				}
 				p.processFailedJob(job)
 			}
-			log.Info("finish closing pool")
+
+			log.Info("Finish closing pool")
 
 			// wait for all on-fly retryable jobs are inserted to db
 			p.retryableWaitGroup.Wait()
@@ -287,7 +304,7 @@ func (p *Pool) PrepareRetryableJob(job JobHandler) {
 	// if pool is closed, try update job to db
 	if p.isClosed.Load().(bool) {
 		log.Info("pool closed, update retrying job to database")
-		p.updateRetryingJob(job)
+		p.saveJob(job)
 	}
 	dur := time.Until(time.Unix(job.GetNextTry(), 0))
 	if dur <= 0 {
@@ -305,11 +322,11 @@ func (p *Pool) PrepareRetryableJob(job JobHandler) {
 		p.Enqueue(job)
 	case <-p.ctx.Done():
 		log.Info("pool closed, update retrying job to database")
-		p.updateRetryingJob(job)
+		p.saveJob(job)
 	}
 }
 
-func (p *Pool) updateRetryingJob(job JobHandler) {
+func (p *Pool) saveJob(job JobHandler) {
 	if job == nil {
 		return
 	}
@@ -317,7 +334,7 @@ func (p *Pool) updateRetryingJob(job JobHandler) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	if err := job.Update(stores.STATUS_PENDING); err != nil {
+	if err := job.Save(stores.STATUS_PENDING); err != nil {
 		log.Error("[Pool] failed on updating retrying job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
 		return
 	}
@@ -332,7 +349,7 @@ func (p *Pool) processFailedJob(job JobHandler) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	if err := job.Update(stores.STATUS_FAILED); err != nil {
+	if err := job.Save(stores.STATUS_FAILED); err != nil {
 		log.Error("[Pool] failed on updating failed job", "err", err, "jobType", job.GetType(), "tx", job.GetTransaction().GetHash().Hex())
 		return
 	}
