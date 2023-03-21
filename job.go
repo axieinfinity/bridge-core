@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/axieinfinity/bridge-core/models"
-	"github.com/axieinfinity/bridge-core/stores"
 	"github.com/axieinfinity/bridge-core/utils"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 
@@ -158,27 +157,7 @@ func (e *BaseJob) Utils() utils.Utils {
 	return e.utilsWrapper
 }
 
-func (e *BaseJob) Save() error {
-	job := &models.Job{
-		Listener:         e.listener.GetName(),
-		SubscriptionName: e.subscriptionName,
-		Type:             e.jobType,
-		RetryCount:       e.retryCount,
-		Status:           stores.STATUS_PENDING,
-		Data:             common.Bytes2Hex(e.data),
-		Transaction:      e.tx.GetHash().Hex(),
-		CreatedAt:        time.Now().Unix(),
-		FromChainId:      hexutil.EncodeBig(e.fromChainID),
-	}
-	if err := e.listener.GetStore().GetJobStore().Save(job); err != nil {
-		return err
-	}
-	e.id = int32(job.ID)
-	e.createdAt = time.Unix(job.CreatedAt, 0)
-	return nil
-}
-
-func (e *BaseJob) Update(status string) error {
+func (e *BaseJob) Save(status string) error {
 	job := &models.Job{
 		Listener:         e.listener.GetName(),
 		SubscriptionName: e.subscriptionName,
@@ -189,6 +168,9 @@ func (e *BaseJob) Update(status string) error {
 		Transaction:      e.tx.GetHash().Hex(),
 		CreatedAt:        time.Now().Unix(),
 		FromChainId:      hexutil.EncodeBig(e.fromChainID),
+	}
+	if e.id > 0 {
+		job.ID = int(e.id)
 	}
 	if err := e.listener.GetStore().GetJobStore().Save(job); err != nil {
 		return err
