@@ -128,13 +128,7 @@ func (p *Pool) startWorker(w Worker) {
 			if job == nil {
 				continue
 			}
-			if p.isClosed.Load().(bool) {
-				// update job to db
-				if err := job.Save(stores.STATUS_PENDING); err != nil {
-					log.Error("[Pool] failed on updating failed job", "err", err, "jobType", job.GetType())
-				}
-				continue
-			}
+
 			log.Debug("processing job", "id", job.GetID(), "nextTry", job.GetNextTry(), "retryCount", job.GetRetryCount(), "type", job.GetType())
 			if err := w.ProcessJob(job); err != nil {
 				// update try and next retry time
@@ -149,8 +143,10 @@ func (p *Pool) startWorker(w Worker) {
 				p.RetryJob(job)
 			}
 		case <-w.Context().Done():
-			w.Close()
-			return
+			if len(w.Channel()) <= 0 {
+				w.Close()
+				return
+			}
 		}
 	}
 }
@@ -222,12 +218,7 @@ func (p *Pool) Start(closeFunc func()) {
 			if job == nil {
 				continue
 			}
-			if p.isClosed.Load().(bool) {
-				if err := job.Save(stores.STATUS_PENDING); err != nil {
-					log.Error("[Pool] failed on saving processing job", "err", err, "jobType", job.GetType())
-				}
-				continue
-			}
+
 			log.Debug("[Pool] jobChan received a job", "jobId", job.GetID(), "nextTry", job.GetNextTry(), "type", job.GetType())
 			workerCh := <-p.Queue
 			p.SendJobToWorker(workerCh, job)
