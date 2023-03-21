@@ -251,7 +251,7 @@ func (p *Pool) Start(closeFunc func()) {
 			close(p.RetryJobChan)
 			close(p.Queue)
 
-			log.Info("Saving %d unprocessed jobs.", "jobs", len(p.JobChan))
+			log.Info("Saving unprocessed jobs.", "jobs", len(p.JobChan))
 			for {
 				job, more := <-p.JobChan
 				if !more {
@@ -261,7 +261,7 @@ func (p *Pool) Start(closeFunc func()) {
 				p.saveJob(job)
 			}
 
-			log.Info("Saving %d unprocessed retry jobs.", "jobs", len(p.RetryJobChan))
+			log.Info("Saving unprocessed retry jobs.", "jobs", len(p.RetryJobChan))
 			for {
 				job, more := <-p.RetryJobChan
 				if !more {
@@ -271,7 +271,7 @@ func (p *Pool) Start(closeFunc func()) {
 				p.saveJob(job)
 			}
 
-			log.Info("Saving %d unprocessed fail jobs.", "jobs", len(p.FailedJobChan))
+			log.Info("Saving unprocessed fail jobs.", "jobs", len(p.FailedJobChan))
 			for {
 				job, more := <-p.FailedJobChan
 				if !more {
