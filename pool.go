@@ -2,16 +2,17 @@ package bridge_core
 
 import (
 	"context"
+	"runtime/debug"
+	"sync"
+	"sync/atomic"
+	"time"
+
 	"github.com/axieinfinity/bridge-core/adapters"
 	"github.com/axieinfinity/bridge-core/metrics"
 	"github.com/axieinfinity/bridge-core/stores"
 	"github.com/axieinfinity/bridge-core/utils"
 	"github.com/ethereum/go-ethereum/log"
 	"gorm.io/gorm"
-	"runtime/debug"
-	"sync"
-	"sync/atomic"
-	"time"
 )
 
 const (
@@ -250,8 +251,8 @@ func (p *Pool) Start(closeFunc func()) {
 			close(p.RetryJobChan)
 			close(p.Queue)
 
+			log.Info("Saving %d unprocessed jobs.", "jobs", len(p.JobChan))
 			for {
-				log.Info("checking job chan")
 				job, more := <-p.JobChan
 				if !more {
 					break
@@ -260,8 +261,8 @@ func (p *Pool) Start(closeFunc func()) {
 				p.saveJob(job)
 			}
 
+			log.Info("Saving %d unprocessed retry jobs.", "jobs", len(p.RetryJobChan))
 			for {
-				log.Info("checking retrying jobs")
 				job, more := <-p.RetryJobChan
 				if !more {
 					break
@@ -270,15 +271,16 @@ func (p *Pool) Start(closeFunc func()) {
 				p.saveJob(job)
 			}
 
+			log.Info("Saving %d unprocessed fail jobs.", "jobs", len(p.FailedJobChan))
 			for {
-				log.Info("checking failedJobChan")
 				job, more := <-p.FailedJobChan
 				if !more {
 					break
 				}
 				p.processFailedJob(job)
 			}
-			log.Info("finish closing pool")
+
+			log.Info("Finish closing pool")
 
 			// wait for all on-fly retryable jobs are inserted to db
 			p.retryableWaitGroup.Wait()
