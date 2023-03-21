@@ -14,6 +14,7 @@ type Worker interface {
 	ProcessJob(job JobHandler) error
 	IsClose() bool
 	Channel() chan JobHandler
+	Wait()
 }
 
 type BridgeWorker struct {
@@ -65,4 +66,12 @@ func (w *BridgeWorker) Channel() chan JobHandler {
 func (w *BridgeWorker) Close() {
 	atomic.StoreInt32(&w.isClose, 1)
 	close(w.workerChan)
+}
+
+func (w *BridgeWorker) Wait() {
+	for {
+		if atomic.LoadInt32(&w.isClose) == 1 {
+			return
+		}
+	}
 }
