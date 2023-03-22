@@ -3,9 +3,10 @@ package bridge_core
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
+
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/go-stack/stack"
-	"sync/atomic"
 )
 
 type Worker interface {
@@ -13,6 +14,7 @@ type Worker interface {
 	Close()
 	ProcessJob(job JobHandler) error
 	IsClose() bool
+	Stop()
 	Channel() chan JobHandler
 	Wait()
 }
@@ -23,6 +25,7 @@ type BridgeWorker struct {
 	// workerChan is used to receive and process job
 	workerChan chan JobHandler
 	listeners  map[string]Listener
+	stopCh     chan struct{}
 	isClose    int32
 }
 
@@ -31,6 +34,7 @@ func NewWorker(ctx context.Context, id int, size int, listeners map[string]Liste
 		ctx:        ctx,
 		id:         id,
 		workerChan: make(chan JobHandler, size),
+		stopCh:     make(chan struct{}),
 		listeners:  listeners,
 	}
 }
@@ -68,10 +72,10 @@ func (w *BridgeWorker) Close() {
 	close(w.workerChan)
 }
 
+func (w *BridgeWorker) Stop() {
+	close(w.stopCh)
+}
+
 func (w *BridgeWorker) Wait() {
-	for {
-		if atomic.LoadInt32(&w.isClose) == 1 {
-			return
-		}
-	}
+	<-w.stopCh
 }

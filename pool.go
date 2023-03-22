@@ -114,39 +114,37 @@ func (p *Pool) startWorker(w Worker) {
 	defer func() {
 		if r := recover(); r != nil {
 			if err, ok := r.(error); ok && err.Error() == "send on closed channel" {
-				w.Close()
 				return
 			}
+
 			log.Error("[BridgeWorker][addToQueue] recover from panic", "message", r, "trace", string(debug.Stack()))
 		}
 	}()
 	for {
 		// push worker chan into queue if worker has not closed yet
 		p.Queue <- w.Channel()
-		select {
-		case job := <-w.Channel():
-			if job == nil {
+		job, more := <-w.Channel()
+		if !more {
+			w.Stop()
+			break
+		}
+
+		if job == nil {
+			continue
+		}
+
+		log.Debug("processing job", "id", job.GetID(), "nextTry", job.GetNextTry(), "retryCount", job.GetRetryCount(), "type", job.GetType())
+		if err := w.ProcessJob(job); err != nil {
+			// update try and next retry time
+			if job.GetRetryCount()+1 > job.GetMaxTry() {
+				log.Info("[Pool][processJob] job reaches its maxTry", "jobTransaction", job.GetTransaction().GetHash().Hex())
+				p.FailedJobChan <- job
 				continue
 			}
-
-			log.Debug("processing job", "id", job.GetID(), "nextTry", job.GetNextTry(), "retryCount", job.GetRetryCount(), "type", job.GetType())
-			if err := w.ProcessJob(job); err != nil {
-				// update try and next retry time
-				if job.GetRetryCount()+1 > job.GetMaxTry() {
-					log.Info("[Pool][processJob] job reaches its maxTry", "jobTransaction", job.GetTransaction().GetHash().Hex())
-					p.FailedJobChan <- job
-					continue
-				}
-				job.IncreaseRetryCount()
-				job.UpdateNextTry(time.Now().Unix() + int64(job.GetRetryCount()*job.GetBackOff()))
-				// send to retry job chan
-				p.RetryJob(job)
-			}
-		case <-w.Context().Done():
-			if len(w.Channel()) <= 0 {
-				w.Close()
-				return
-			}
+			job.IncreaseRetryCount()
+			job.UpdateNextTry(time.Now().Unix() + int64(job.GetRetryCount()*job.GetBackOff()))
+			// send to retry job chan
+			p.RetryJob(job)
 		}
 	}
 }
@@ -223,7 +221,7 @@ func (p *Pool) Start(closeFunc func()) {
 			workerCh := <-p.Queue
 			p.SendJobToWorker(workerCh, job)
 		case <-p.ctx.Done():
-			log.Info("closing pool...")
+			log.Info("Closing pool...")
 			p.isClosed.Store(true)
 
 			// call close function firstly
@@ -231,26 +229,33 @@ func (p *Pool) Start(closeFunc func()) {
 				closeFunc()
 			}
 
-			// wait for all worker finish their close
-			for _, worker := range p.Workers {
-				worker.Wait()
-			}
-
 			// close all available channels to prevent further data send to pool's channels
 			close(p.JobChan)
-			close(p.FailedJobChan)
-			close(p.RetryJobChan)
-			close(p.Queue)
 
-			log.Info("Saving unprocessed jobs.", "jobs", len(p.JobChan))
+			log.Info("Trying to process all pending jobs.", "jobs", len(p.JobChan))
 			for {
 				job, more := <-p.JobChan
 				if !more {
 					break
 				}
-				// update job
-				p.saveJob(job)
+
+				if job == nil {
+					continue
+				}
+
+				workerCh := <-p.Queue
+				p.SendJobToWorker(workerCh, job)
 			}
+
+			// wait for all worker finish their close
+			for _, worker := range p.Workers {
+				worker.Close()
+				worker.Wait()
+			}
+
+			close(p.FailedJobChan)
+			close(p.RetryJobChan)
+			close(p.Queue)
 
 			log.Info("Saving unprocessed retry jobs.", "jobs", len(p.RetryJobChan))
 			for {
@@ -294,9 +299,11 @@ func (p *Pool) Stats() Stats {
 func (p *Pool) PrepareRetryableJob(job JobHandler) {
 	// if pool is closed, try update job to db
 	if p.isClosed.Load().(bool) {
-		log.Info("pool closed, update retrying job to database")
+		log.Debug("pool closed, update retrying job to database")
 		p.saveJob(job)
+		return
 	}
+
 	dur := time.Until(time.Unix(job.GetNextTry(), 0))
 	if dur <= 0 {
 		return
