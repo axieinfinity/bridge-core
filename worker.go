@@ -3,7 +3,6 @@ package bridge_core
 import (
 	"context"
 	"fmt"
-	"sync/atomic"
 
 	"github.com/ethereum/go-ethereum/log"
 	"github.com/go-stack/stack"
@@ -13,7 +12,6 @@ type Worker interface {
 	Context() context.Context
 	Close()
 	ProcessJob(job JobHandler) error
-	IsClose() bool
 	Stop()
 	Channel() chan JobHandler
 	Wait()
@@ -26,7 +24,6 @@ type BridgeWorker struct {
 	workerChan chan JobHandler
 	listeners  map[string]Listener
 	stopCh     chan struct{}
-	isClose    int32
 }
 
 func NewWorker(ctx context.Context, id int, size int, listeners map[string]Listener) *BridgeWorker {
@@ -59,16 +56,11 @@ func (w *BridgeWorker) Context() context.Context {
 	return w.ctx
 }
 
-func (w *BridgeWorker) IsClose() bool {
-	return atomic.LoadInt32(&w.isClose) != 0
-}
-
 func (w *BridgeWorker) Channel() chan JobHandler {
 	return w.workerChan
 }
 
 func (w *BridgeWorker) Close() {
-	atomic.StoreInt32(&w.isClose, 1)
 	close(w.workerChan)
 }
 
