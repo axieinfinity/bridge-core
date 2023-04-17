@@ -1,16 +1,13 @@
-package bridge_core
+package types
 
 import (
-	"context"
 	"math/big"
 	"time"
 
-	"github.com/axieinfinity/bridge-core/models"
 	"github.com/axieinfinity/bridge-core/stores"
 	"github.com/axieinfinity/bridge-core/utils"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/ethereum/go-ethereum/core/types"
 )
 
 const (
@@ -22,61 +19,6 @@ const (
 	TxEvent = iota
 	LogEvent
 )
-
-type Listener interface {
-	GetName() string
-	GetStore() stores.MainStore
-	Config() *LsConfig
-
-	Period() time.Duration
-	GetSafeBlockRange() uint64
-	GetCurrentBlock() Block
-	GetLatestBlock() (Block, error)
-	GetLatestBlockHeight() (uint64, error)
-	GetBlock(height uint64) (Block, error)
-	GetBlockWithLogs(height uint64) (Block, error)
-	GetChainID() (*big.Int, error)
-	GetReceipt(common.Hash) (*types.Receipt, error)
-	Context() context.Context
-
-	GetSubscriptions() map[string]*Subscribe
-
-	UpdateCurrentBlock(block Block) error
-
-	SaveCurrentBlockToDB() error
-	SaveTransactionsToDB(txs []Transaction) error
-
-	GetListenHandleJob(subscriptionName string, tx Transaction, eventId string, data []byte) JobHandler
-	SendCallbackJobs(listeners map[string]Listener, subscriptionName string, tx Transaction, inputData []byte)
-
-	NewJobFromDB(job *models.Job) (JobHandler, error)
-
-	Start()
-	Close()
-
-	IsDisabled() bool
-	SetInitHeight(uint64)
-	GetInitHeight() uint64
-
-	GetEthClient() utils.EthClient
-
-	GetTasks() []TaskHandler
-	GetTask(index int) TaskHandler
-	AddTask(handler TaskHandler)
-
-	IsUpTodate() bool
-
-	GetBridgeOperatorSign() utils.ISign
-	GetVoterSign() utils.ISign
-	GetRelayerSign() utils.ISign
-	GetLegacyBridgeOperatorSign() utils.ISign
-
-	AddListeners(map[string]Listener)
-
-	// GetListener returns listener by name
-	GetListener(string) Listener
-	CacheBlocks(blockNumbers map[uint64]struct{})
-}
 
 type Transaction interface {
 	GetHash() common.Hash
@@ -107,34 +49,6 @@ type Block interface {
 	GetTransactions() []Transaction
 	GetLogs() []Log
 	GetTimestamp() uint64
-}
-
-type JobHandler interface {
-	GetID() int32
-	GetType() int
-	GetRetryCount() int
-	GetNextTry() int64
-	GetMaxTry() int
-	GetData() []byte
-	GetValue() *big.Int
-	GetBackOff() int
-
-	Process() ([]byte, error)
-	Hash() common.Hash
-
-	IncreaseRetryCount()
-	UpdateNextTry(int64)
-
-	GetListener() Listener
-	GetSubscriptionName() string
-	GetTransaction() Transaction
-
-	FromChainID() *big.Int
-
-	Save(string) error
-
-	CreatedAt() time.Time
-	String() string
 }
 
 type TaskHandler interface {

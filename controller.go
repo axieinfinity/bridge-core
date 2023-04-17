@@ -11,7 +11,9 @@ import (
 	bridge_contracts "github.com/axieinfinity/bridge-contracts"
 	"github.com/axieinfinity/bridge-core/adapters"
 	"github.com/axieinfinity/bridge-core/metrics"
+	"github.com/axieinfinity/bridge-core/services"
 	"github.com/axieinfinity/bridge-core/stores"
+	"github.com/axieinfinity/bridge-core/types"
 	"github.com/axieinfinity/bridge-core/utils"
 	"github.com/sony/gobreaker"
 
@@ -28,13 +30,13 @@ const (
 	defaultTaskInterval = 3
 )
 
-var listeners map[string]func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore, helpers utils.Utils, pool *Pool) Listener
+var listeners map[string]func(ctx context.Context, lsConfig *types.LsConfig, store stores.MainStore, helpers utils.Utils, pool types.Pool) Listener
 
 func init() {
 	listeners = make(map[string]func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore, helpers utils.Utils, pool *Pool) Listener)
 }
 
-func AddListener(name string, initFunc func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore, helpers utils.Utils, pool *Pool) Listener) {
+func AddListener(name string, initFunc func(ctx context.Context, lsConfig *types.LsConfig, store stores.MainStore, helpers utils.Utils, pool *Pool) types.Listener) {
 	listeners[name] = initFunc
 }
 
@@ -42,23 +44,24 @@ type Controller struct {
 	ctx        context.Context
 	cancelFunc context.CancelFunc
 
-	listeners   map[string]Listener
+	listeners   map[string]types.Listener
 	HandlerABIs map[string]*abi.ABI
 	utilWrapper utils.Utils
 
-	Pool *Pool
-	cfg  *Config
+	cfg types.Config
 
 	store               stores.MainStore
 	hasSubscriptionType map[string]map[int]bool
 
 	processingFrame int64
 	cb              *gobreaker.CircuitBreaker
+
+	jobService services.JobService
 }
 
-func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
+func New(cfg *types.Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 	if cfg.NumberOfWorkers <= 0 {
-		cfg.NumberOfWorkers = defaultWorkers
+		cfg.NumberOfWorkers = types.DefaultWorkers
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -66,13 +69,13 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 		cfg:                 cfg,
 		ctx:                 ctx,
 		cancelFunc:          cancel,
-		listeners:           make(map[string]Listener),
+		listeners:           make(map[string]types.Listener),
 		HandlerABIs:         make(map[string]*abi.ABI),
 		utilWrapper:         utils.NewUtils(),
 		processingFrame:     time.Now().Unix(),
 		store:               stores.NewMainStore(db),
 		hasSubscriptionType: make(map[string]map[int]bool),
-		Pool:                NewPool(ctx, cfg, db, nil),
+		Pool:                types.NewPool(ctx, cfg, db, nil),
 		cb: gobreaker.NewCircuitBreaker(gobreaker.Settings{
 			Name:     "process pending jobs",
 			Interval: 60 * time.Second,
@@ -134,10 +137,10 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 			c.hasSubscriptionType[name][subscription.Type] = true
 		}
 	}
-	var workers []Worker
+	var workers []types.Worker
 	// init workers
 	for i := 0; i < cfg.NumberOfWorkers; i++ {
-		w := NewWorker(ctx, i, c.Pool.MaxQueueSize, c.listeners)
+		w := types.NewWorker(ctx, i, c.Pool.MaxQueueSize, c.listeners)
 		workers = append(workers, w)
 	}
 	c.Pool.AddWorkers(workers)
@@ -145,7 +148,7 @@ func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 }
 
 // LoadABIsFromConfig loads all ABIPath and add results to Handler.ABI
-func (c *Controller) LoadABIsFromConfig(lsConfig *LsConfig) (err error) {
+func (c *Controller) LoadABIsFromConfig(lsConfig *types.LsConfig) (err error) {
 	for _, subscription := range lsConfig.Subscriptions {
 		// if contract is not defined or abi is not nil then do nothing
 		if subscription.Handler.Contract == "" || subscription.Handler.ABI != nil {
@@ -200,7 +203,7 @@ func (c *Controller) processPendingJobs() {
 			if !ok || listener.IsDisabled() {
 				continue
 			}
-			if job.Type == CallbackHandler && job.Method == "" {
+			if job.Type == types.CallbackHandler && job.Method == "" {
 				// invalid job, update it to failed
 				job.Status = stores.STATUS_FAILED
 				if err = listener.GetStore().GetJobStore().Update(job); err != nil {
@@ -221,9 +224,10 @@ func (c *Controller) processPendingJobs() {
 				break
 			}
 
-			j, _ := ji.(JobHandler)
+			j, _ := ji.(types.Job)
 			// add job to jobChan
 			if j != nil {
+				c.jobService.Process(context.Background(), j)
 				c.Pool.Enqueue(j)
 				job.Status = stores.STATUS_PROCESSED
 				c.store.GetJobStore().Update(job)
