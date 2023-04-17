@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/rlp"
-	"golang.org/x/crypto/sha3"
 	"math/big"
 	"os"
 	"reflect"
 	"sync"
+
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/rlp"
+	"golang.org/x/crypto/sha3"
 
 	kmsUtils "github.com/axieinfinity/ronin-kms-client/utils"
 	"github.com/ethereum/go-ethereum"
@@ -25,6 +26,8 @@ import (
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
+
+const Percentage = 100
 
 // hasherPool holds LegacyKeccak256 hashers for rlpHash.
 var hasherPool = sync.Pool{
@@ -50,7 +53,7 @@ type Utils interface {
 	UnpackToInterface(a abi.ABI, name string, data []byte, isInput bool, v interface{}) error
 	Title(text string) string
 	NewEthClient(url string) (EthClient, error)
-	SendContractTransaction(signMethod ISign, chainId *big.Int, fn func(opts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error)
+	SendContractTransaction(signMethod ISign, chainId *big.Int, gasLimitBumpRatio uint64, fn func(opts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error)
 	SignTypedData(typedData core.TypedData, signMethod ISign) (hexutil.Bytes, error)
 	FilterLogs(client EthClient, opts *bind.FilterOpts, contractAddresses []common.Address, filteredMethods map[*abi.ABI]map[string]struct{}) ([]types.Log, error)
 	RlpHash(x interface{}) (h common.Hash)
@@ -178,11 +181,25 @@ func newKeyedTransactorWithChainID(signMethod ISign, chainID *big.Int) (*bind.Tr
 	}, nil
 }
 
-func (u *utils) SendContractTransaction(signMethod ISign, chainId *big.Int, fn func(opts *bind.TransactOpts) (*types.Transaction, error)) (*types.Transaction, error) {
+func (u *utils) SendContractTransaction(
+	signMethod ISign,
+	chainId *big.Int,
+	gasLimitBumpRatio uint64,
+	fn func(opts *bind.TransactOpts) (*types.Transaction, error),
+) (*types.Transaction, error) {
 	opts, err := newKeyedTransactorWithChainID(signMethod, chainId)
 	if err != nil {
 		return nil, err
 	}
+	// Estimate gas
+	opts.NoSend = true
+	tx, err := fn(opts)
+	if err != nil {
+		return nil, err
+	}
+
+	opts.NoSend = false
+	opts.GasLimit = tx.Gas() * gasLimitBumpRatio / Percentage
 	return fn(opts)
 }
 

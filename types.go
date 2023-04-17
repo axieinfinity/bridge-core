@@ -181,7 +181,8 @@ type LsConfig struct {
 
 	// MaxProcessingTasks is used to specify max processing tasks allowed while processing tasks
 	// if number of tasks reaches this number, it waits until this number decrease
-	MaxProcessingTasks int `json:"maxProcessingTasks"`
+	MaxProcessingTasks int    `json:"maxProcessingTasks"`
+	GasLimitBumpRatio  uint64 `json:"gasLimitBumpRatio"`
 }
 
 type Secret struct {
