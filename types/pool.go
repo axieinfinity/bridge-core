@@ -56,7 +56,10 @@ func (p *pool[T]) Capacity() int {
 }
 
 func NewPool[T any](items []T, capacity int) Pool[T] {
-	p := &pool[T]{}
+	p := &pool[T]{
+		queue:    make(chan T, capacity),
+		capacity: capacity,
+	}
 	count := int(math.Min(float64(capacity), float64(len(items))))
 	for i := 0; i < count; i++ {
 		p.Put(items[i])

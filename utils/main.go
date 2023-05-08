@@ -5,13 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/rlp"
-	"golang.org/x/crypto/sha3"
 	"math/big"
 	"os"
 	"reflect"
 	"sync"
+
+	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/rlp"
+	"golang.org/x/crypto/sha3"
 
 	kmsUtils "github.com/axieinfinity/ronin-kms-client/utils"
 	"github.com/ethereum/go-ethereum"
@@ -219,23 +220,12 @@ func (u *utils) FilterLogs(client EthClient, opts *bind.FilterOpts, contractAddr
 	if opts == nil {
 		opts = new(bind.FilterOpts)
 	}
-	var (
-		query  [][]interface{}
-		events []interface{}
-	)
 
-	for contractAbi, methods := range filteredMethods {
-		for method, _ := range methods {
-			if _, ok := contractAbi.Events[method]; ok {
-				events = append(events, contractAbi.Events[method].ID)
-			}
-		}
-	}
-	query = append(query, events)
-	topics, err := abi.MakeTopics(query...)
+	topics, err := MakeTopics(filteredMethods)
 	if err != nil {
 		return nil, err
 	}
+
 	config := ethereum.FilterQuery{
 		Addresses: contractAddresses,
 		Topics:    topics,
@@ -276,4 +266,26 @@ func (u *utils) UnpackLog(smcAbi abi.ABI, out interface{}, event string, data []
 		}
 	}
 	return abi.ParseTopics(out, indexed, log.Topics[1:])
+}
+
+func MakeTopics(filteredMethods map[*abi.ABI]map[string]struct{}) ([][]common.Hash, error) {
+	var (
+		query  [][]interface{}
+		events []interface{}
+	)
+
+	for contractAbi, methods := range filteredMethods {
+		for method, _ := range methods {
+			if _, ok := contractAbi.Events[method]; ok {
+				events = append(events, contractAbi.Events[method].ID)
+			}
+		}
+	}
+	query = append(query, events)
+	topics, err := abi.MakeTopics(query...)
+	if err != nil {
+		return nil, err
+	}
+
+	return topics, nil
 }

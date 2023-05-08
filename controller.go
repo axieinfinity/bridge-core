@@ -2,80 +2,77 @@ package bridge_core
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"runtime/debug"
-	"strings"
+	"fmt"
+	"math/big"
 	"time"
 
 	bridge_contracts "github.com/axieinfinity/bridge-contracts"
-	"github.com/axieinfinity/bridge-core/adapters"
-	"github.com/axieinfinity/bridge-core/metrics"
-	"github.com/axieinfinity/bridge-core/services"
+	"github.com/axieinfinity/bridge-core/orchestrators"
 	"github.com/axieinfinity/bridge-core/stores"
 	"github.com/axieinfinity/bridge-core/types"
 	"github.com/axieinfinity/bridge-core/utils"
 	"github.com/sony/gobreaker"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
-	"github.com/ethereum/go-ethereum/accounts/abi/bind"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/log"
-	"gorm.io/gorm"
 )
 
 const (
-	defaultBatchSize    = 100
-	defaultMaxRetry     = 10
-	defaultTaskInterval = 3
+	defaultBatchSize = 100
+	defaultMaxRetry  = 10
 )
 
-var listeners map[string]func(ctx context.Context, lsConfig *types.LsConfig, store stores.MainStore, helpers utils.Utils, pool types.Pool) Listener
+// var listeners map[string]func(ctx context.Context, lsConfig *types.LsConfig, store stores.MainStore, helpers utils.Utils) types.Listener
 
-func init() {
-	listeners = make(map[string]func(ctx context.Context, lsConfig *LsConfig, store stores.MainStore, helpers utils.Utils, pool *Pool) Listener)
-}
+// func init() {
+// 	listeners = make(map[string]func(ctx context.Context, lsConfig *types.LsConfig, store stores.MainStore, helpers utils.Utils) types.Listener)
+// }
 
-func AddListener(name string, initFunc func(ctx context.Context, lsConfig *types.LsConfig, store stores.MainStore, helpers utils.Utils, pool *Pool) types.Listener) {
-	listeners[name] = initFunc
-}
+// func AddListener(name string, initFunc func(ctx context.Context, lsConfig *types.LsConfig, store stores.MainStore, helpers utils.Utils) types.Listener) {
+// 	listeners[name] = initFunc
+// }
 
 type Controller struct {
-	ctx        context.Context
-	cancelFunc context.CancelFunc
-
-	listeners   map[string]types.Listener
+	clients     map[string]types.ChainClient
 	HandlerABIs map[string]*abi.ABI
 	utilWrapper utils.Utils
 
-	cfg types.Config
+	cfg             *types.Config
+	getLogBatchSize int
 
 	store               stores.MainStore
 	hasSubscriptionType map[string]map[int]bool
+	subscriptions       map[string]*types.Subscribe
 
 	processingFrame int64
 	cb              *gobreaker.CircuitBreaker
 
-	jobService services.JobService
+	logOrchestrator         orchestrators.LogOrchestrator
+	transactionOrchestrator orchestrators.TransactionOrchestrator
+
+	currentHeights map[*big.Int]uint64 // map chain id -> processed block height
 }
 
-func New(cfg *types.Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
-	if cfg.NumberOfWorkers <= 0 {
-		cfg.NumberOfWorkers = types.DefaultWorkers
-	}
+func New(
+	store stores.MainStore,
+	clients map[string]types.ChainClient,
+	subscriptions map[string]*types.Subscribe,
+	logOrchestrator orchestrators.LogOrchestrator,
+	transactionOrchestrator orchestrators.TransactionOrchestrator,
+) *Controller {
+	// if cfg.NumberOfWorkers <= 0 {
+	// 	cfg.NumberOfWorkers = types.DefaultWorkers
+	// }
 
-	ctx, cancel := context.WithCancel(context.Background())
 	c := &Controller{
-		cfg:                 cfg,
-		ctx:                 ctx,
-		cancelFunc:          cancel,
-		listeners:           make(map[string]types.Listener),
+		clients:             clients,
 		HandlerABIs:         make(map[string]*abi.ABI),
 		utilWrapper:         utils.NewUtils(),
 		processingFrame:     time.Now().Unix(),
-		store:               stores.NewMainStore(db),
+		store:               store,
 		hasSubscriptionType: make(map[string]map[int]bool),
-		Pool:                types.NewPool(ctx, cfg, db, nil),
+		subscriptions:       subscriptions,
 		cb: gobreaker.NewCircuitBreaker(gobreaker.Settings{
 			Name:     "process pending jobs",
 			Interval: 60 * time.Second,
@@ -85,93 +82,106 @@ func New(cfg *types.Config, db *gorm.DB, helpers utils.Utils) (*Controller, erro
 				return (counts.Requests > 10 && failureRatio >= 0.8) || counts.ConsecutiveFailures > 5
 			},
 		}),
+		logOrchestrator:         logOrchestrator,
+		transactionOrchestrator: transactionOrchestrator,
+		getLogBatchSize:         defaultBatchSize,
+		currentHeights:          make(map[*big.Int]uint64),
 	}
 
-	if adapters.AppConfig.Prometheus.TurnOn {
-		metrics.RunPusher(ctx)
+	for k, v := range subscriptions {
+		if _, ok := c.hasSubscriptionType[k][v.Type]; !ok {
+			c.hasSubscriptionType[k] = map[int]bool{}
+		}
+		c.hasSubscriptionType[k][v.Type] = true
 	}
 
-	if helpers != nil {
-		c.utilWrapper = helpers
-	}
+	// if adapters.AppConfig.Prometheus.TurnOn {
+	// 	metrics.RunPusher(ctx)
+	// }
+
+	// if helpers != nil {
+	// 	c.utilWrapper = helpers
+	// }
 
 	// add listeners from config
-	for name, lsConfig := range c.cfg.Listeners {
-		if lsConfig.LoadInterval <= 0 {
-			lsConfig.LoadInterval = defaultTaskInterval
-		}
-		lsConfig.LoadInterval *= time.Second
-		lsConfig.Name = name
+	// for name, lsConfig := range c.cfg.Listeners {
+	// 	if lsConfig.LoadInterval <= 0 {
+	// 		lsConfig.LoadInterval = defaultTaskInterval
+	// 	}
+	// 	lsConfig.LoadInterval *= time.Second
+	// 	lsConfig.Name = name
 
-		// load abi from lsConfig
-		if err := c.LoadABIsFromConfig(lsConfig); err != nil {
-			return nil, err
-		}
+	// 	// load abi from lsConfig
+	// 	if err := c.LoadABIsFromConfig(lsConfig); err != nil {
+	// 		return nil, err
+	// 	}
 
-		// Invoke init function which is based on listener's name
-		initFunc, ok := listeners[name]
-		if !ok {
-			continue
-		}
-		l := initFunc(c.ctx, lsConfig, c.store, c.utilWrapper, c.Pool)
-		if l == nil {
-			return nil, errors.New("listener is nil")
-		}
+	// 	// Invoke init function which is based on listener's name
+	// 	initFunc, ok := listeners[name]
+	// 	if !ok {
+	// 		continue
+	// 	}
+	// 	l := initFunc(c.ctx, lsConfig, c.store, c.utilWrapper, c.Pool)
+	// 	if l == nil {
+	// 		return nil, errors.New("listener is nil")
+	// 	}
 
-		// set listeners to listeners
-		l.AddListeners(c.listeners)
+	// 	// set listeners to listeners
+	// 	l.AddListeners(c.listeners)
 
-		// add listener to controller
-		c.listeners[name] = l
-		c.hasSubscriptionType[name] = make(map[int]bool)
+	// 	// add listener to controller
+	// 	c.listeners[name] = l
+	// 	c.hasSubscriptionType[name] = make(map[int]bool)
 
-		if lsConfig.GetLogsBatchSize == 0 {
-			lsConfig.GetLogsBatchSize = defaultBatchSize
-		}
+	// 	if lsConfig.GetLogsBatchSize == 0 {
+	// 		lsConfig.GetLogsBatchSize = defaultBatchSize
+	// 	}
 
-		// filtering subscription, get all subscriptionType available for each listener
-		for _, subscription := range l.GetSubscriptions() {
-			if c.hasSubscriptionType[name][subscription.Type] {
-				continue
-			}
-			c.hasSubscriptionType[name][subscription.Type] = true
-		}
-	}
-	var workers []types.Worker
-	// init workers
-	for i := 0; i < cfg.NumberOfWorkers; i++ {
-		w := types.NewWorker(ctx, i, c.Pool.MaxQueueSize, c.listeners)
-		workers = append(workers, w)
-	}
-	c.Pool.AddWorkers(workers)
-	return c, nil
+	// 	// filtering subscription, get all subscriptionType available for each listener
+	// 	for _, subscription := range l.GetSubscriptions() {
+	// 		if c.hasSubscriptionType[name][subscription.Type] {
+	// 			continue
+	// 		}
+	// 		c.hasSubscriptionType[name][subscription.Type] = true
+	// 	}
+	// }
+
+	// var workers []types.Worker
+	// // init workers
+	// for i := 0; i < cfg.NumberOfWorkers; i++ {
+	// 	w := types.NewWorker(ctx, i, c.Pool.MaxQueueSize, c.listeners)
+	// 	workers = append(workers, w)
+	// }
+	// c.Pool.AddWorkers(workers)
+	return c
 }
 
 // LoadABIsFromConfig loads all ABIPath and add results to Handler.ABI
-func (c *Controller) LoadABIsFromConfig(lsConfig *types.LsConfig) (err error) {
-	for _, subscription := range lsConfig.Subscriptions {
-		// if contract is not defined or abi is not nil then do nothing
+func (c *Controller) LoadABIs() (err error) {
+	for _, subscription := range c.subscriptions {
 		if subscription.Handler.Contract == "" || subscription.Handler.ABI != nil {
 			continue
 		}
-		// load abi for handler
 		if subscription.Handler.ABI, err = bridge_contracts.ABIMaps[subscription.Handler.Contract].GetAbi(); err != nil {
 			return err
 		}
 	}
-	return
-}
 
-func (c *Controller) Start() error {
-	go c.Pool.Start(c.closeListeners)
-	c.processPendingJobs()
-	c.startListeners()
 	return nil
 }
 
-func (c *Controller) processPendingJobs() {
+func (c *Controller) Start(ctx context.Context) error {
+	go c.logOrchestrator.Start(ctx)
+	go c.transactionOrchestrator.Start(ctx)
+
+	c.processPendingJobs(ctx)
+	c.startListeners(ctx)
+	return nil
+}
+
+func (c *Controller) processPendingJobs(ctx context.Context) {
 	var listeners []string
-	for _, v := range c.listeners {
+	for _, v := range c.clients {
 		listeners = append(listeners, v.GetName())
 	}
 	if len(listeners) == 0 {
@@ -180,7 +190,7 @@ func (c *Controller) processPendingJobs() {
 	for {
 		// stop processing if controller is closed
 		select {
-		case <-c.ctx.Done():
+		case <-ctx.Done():
 			return
 		default:
 			// do nothing
@@ -198,218 +208,205 @@ func (c *Controller) processPendingJobs() {
 		if len(jobs) == 0 {
 			return
 		}
+
+		var (
+			logJobs         = make([]types.Job[types.Log], 0)
+			transactionJobs = make([]types.Job[types.Transaction], 0)
+		)
 		for _, job := range jobs {
-			listener, ok := c.listeners[job.Listener]
-			if !ok || listener.IsDisabled() {
-				continue
-			}
-			if job.Type == types.CallbackHandler && job.Method == "" {
-				// invalid job, update it to failed
-				job.Status = stores.STATUS_FAILED
-				if err = listener.GetStore().GetJobStore().Update(job); err != nil {
-					log.Error("[Controller] error while updating invalid job", "err", err, "id", job.ID)
-				}
-				continue
-			}
-			ji, err := c.cb.Execute(func() (interface{}, error) {
-				j, err := listener.NewJobFromDB(job)
-				if err != nil {
-					log.Error("[Controller] error while init job from db", "err", err, "jobId", job.ID, "type", job.Type)
-					return nil, err
-				}
-				return j, nil
-			})
-			if err == gobreaker.ErrOpenState {
-				log.Info("Processing pending jobs failed too many times, break")
-				break
-			}
 
-			j, _ := ji.(types.Job)
-			// add job to jobChan
-			if j != nil {
-				c.jobService.Process(context.Background(), j)
-				c.Pool.Enqueue(j)
-				job.Status = stores.STATUS_PROCESSED
-				c.store.GetJobStore().Update(job)
+			switch job.Type {
+			case types.JobTypeLog:
+
+				logJobs = append(logJobs, types.Job[types.Log]{})
+			case types.JobTypeTransaction:
+
 			}
+			// create listener
+			_ = job
+			// listener, ok := c.listeners[job.Listener]
+			// if !ok || listener.IsDisabled() {
+			// 	continue
+			// }
+			// if job.Type == types.CallbackHandler && job.Method == "" {
+			// 	// invalid job, update it to failed
+			// 	job.Status = stores.STATUS_FAILED
+			// 	if err = listener.GetStore().GetJobStore().Update(job); err != nil {
+			// 		log.Error("[Controller] error while updating invalid job", "err", err, "id", job.ID)
+			// 	}
+			// 	continue
+			// }
+			// ji, err := c.cb.Execute(func() (interface{}, error) {
+			// 	j, err := listener.NewJobFromDB(job)
+			// 	if err != nil {
+			// 		log.Error("[Controller] error while init job from db", "err", err, "jobId", job.ID, "type", job.Type)
+			// 		return nil, err
+			// 	}
+			// 	return j, nil
+			// })
+			// if err == gobreaker.ErrOpenState {
+			// 	log.Info("Processing pending jobs failed too many times, break")
+			// 	break
+			// }
+
+			// j, _ := ji.(types.Job)
+			// // add job to jobChan
+			// if j != nil {
+			// 	c.logOrchestrator.Process(context.Background(), j)
+			// 	c.Pool.Enqueue(j)
+			// 	job.Status = stores.STATUS_PROCESSED
+			// 	c.store.GetJobStore().Update(job)
+			// }
+		}
+
+		if len(logJobs) > 0 {
+			c.logOrchestrator.Process(ctx, logJobs...)
+		}
+		if len(transactionJobs) > 0 {
+			c.transactionOrchestrator.Process(ctx, transactionJobs...)
 		}
 	}
 
 }
 
-func (c *Controller) startListeners() {
+func (c *Controller) startListeners(ctx context.Context) {
 	// make sure all listeners are up-to-date
-	for _, listener := range c.listeners {
-		if listener.IsDisabled() {
-			continue
-		}
-		for {
-			if listener.IsUpTodate() {
-				break
-			}
-			// sleep for 10s
-			time.Sleep(10 * time.Second)
-		}
-	}
-	// run all events listeners
-	for _, listener := range c.listeners {
-		if listener.IsDisabled() {
-			continue
-		}
-		go listener.Start()
-		go c.startListening(listener, 0)
+	for _, client := range c.clients {
+		go c.startListening(ctx, client, 0)
 	}
 }
 
-func (c *Controller) closeListeners() {
-	for _, listener := range c.listeners {
-		listener.Close()
+func (c *Controller) gatherStats(ctx context.Context) {
+	tick := time.NewTicker(time.Duration(2) * time.Second)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-tick.C:
+			stats := c.logOrchestrator.Stats().Merge(c.transactionOrchestrator.Stats())
+			log.Info("[Controller] orchestrator stats", "retry", stats.RetryableQueue, "queue", stats.Queue, "retryingJob", stats.RetryingJob)
+		}
 	}
+}
+
+func (c *Controller) getCurrentHeight(ctx context.Context, client types.ChainClient) (uint64, error) {
+	var (
+		height int64
+		err    error
+	)
+
+	chainID, err := client.GetChainID()
+	if err != nil {
+		return 0, err
+	}
+
+	if v, ok := c.currentHeights[chainID]; ok {
+		return v, nil
+	}
+
+	id := fmt.Sprintf("0x%x", chainID)
+	height, err = c.store.GetProcessedBlockStore().GetLatestBlock(id)
+	if height != -1 && err != nil {
+		return 0, err
+	}
+
+	if height == -1 {
+		if chainHeight, err := client.GetLatestBlockHeight(ctx); err == nil {
+			c.currentHeights[chainID] = chainHeight
+			return chainHeight, nil
+		}
+	}
+
+	return 0, nil
 }
 
 // startListener starts listening events for a listener, it comes with a tryCount which close this listener if tryCount reaches 10 times
-func (c *Controller) startListening(listener Listener, tryCount int) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Error("[Controller][startListener] recover from panic", "message", r, "trace", string(debug.Stack()))
-		}
-	}()
-	// panic when tryCount reaches 10 times panic
-	if tryCount >= defaultMaxRetry {
-		log.Error("[Controller][startListener] maximum try has been reached, close listener", "listener", listener.GetName())
-		listener.Close()
-		return
-	}
-
-	// check if listener is behind or not
-	latestBlockHeight, err := listener.GetLatestBlockHeight()
-	if err != nil {
-		log.Error("[Controller][startListener] error while get latest block", "err", err, "listener", listener.GetName())
-		// otherwise retry startListener
-		time.Sleep(time.Duration(tryCount+1) * time.Second)
-		c.startListening(listener, tryCount+1)
-		return
-	}
-	// reset fromHeight if it is out of allowed blocks range
-	if listener.Config().ProcessWithinBlocks > 0 && latestBlockHeight-listener.GetInitHeight() > listener.Config().ProcessWithinBlocks {
-		listener.SetInitHeight(latestBlockHeight - listener.Config().ProcessWithinBlocks)
-	}
-	log.Info("[Controller] Latest Block", "height", latestBlockHeight, "listener", listener.GetName())
-	// start processing past blocks
-	currentBlock := listener.GetCurrentBlock()
-	if currentBlock != nil {
-		if err := c.processBehindBlock(listener, currentBlock.GetHeight(), latestBlockHeight); err != nil {
-			log.Error("[Controller][startListener] error while processing behind block", "err", err, "height", currentBlock.GetHeight(), "latestBlockHeight", latestBlockHeight)
-			time.Sleep(time.Duration(tryCount+1) * time.Second)
-			c.startListening(listener, tryCount+1)
-			return
-		}
-	}
-
-	// start stats reporter
-	statsTick := time.NewTicker(time.Duration(2) * time.Second)
-	go func() {
-		for {
-			select {
-			case <-statsTick.C:
-				stats := c.Pool.Stats()
-				log.Info("[Controller] pool stats", "retry", stats.RetryableQueue, "queue", stats.Queue, "retryingJob", stats.RetryingJob)
-			}
-		}
-	}()
-
+func (c *Controller) startListening(ctx context.Context, client types.ChainClient, tryCount int) {
 	// start listening to block's events
-	tick := time.NewTicker(listener.Period())
+	tick := time.NewTicker(client.Period())
 	for {
 		select {
-		case <-listener.Context().Done():
-			listener.SaveCurrentBlockToDB()
+		case <-ctx.Done():
 			return
 		case <-tick.C:
-			// stop if the pool is closed
-			if c.Pool.IsClosed() {
-				// stop timer
-				tick.Stop()
-				statsTick.Stop()
-				// wait for pool is totally shutdown
-				c.Pool.Wait()
-				return
-			}
-			latest, err := listener.GetLatestBlockHeight()
+			log.Info("ehhh")
+			latestHeight, err := client.GetLatestBlockHeight(ctx)
 			if err != nil {
 				log.Error("[Controller][Watcher] error while get latest block height", "err", err)
 				continue
 			}
-			currentBlock = listener.GetCurrentBlock()
+			currentHeight, err := c.getCurrentHeight(ctx, client)
+
 			// do nothing if currentBlock is within safe block range
-			if currentBlock.GetHeight() > latest-listener.GetSafeBlockRange() {
+			if err != nil || currentHeight > latestHeight-client.GetSafeBlockRange() {
 				continue
 			}
 			// if current block is behind safeBlockRange then process without waiting
-			if err := c.processBehindBlock(listener, currentBlock.GetHeight(), latest); err != nil {
-				log.Error("[Controller][Watcher] error while processing behind block", "err", err, "height", currentBlock.GetHeight(), "latestBlockHeight", latestBlockHeight)
+			if err := c.processBehindBlock(ctx, client, currentHeight, latestHeight); err != nil {
+				log.Error("[Controller][Watcher] error while processing behind block", "err", err, "height", currentHeight, "latestHeight", latestHeight)
 				continue
-			} else {
-				currentBlock = listener.GetCurrentBlock()
 			}
 		}
 	}
 }
 
-func (c *Controller) processBehindBlock(listener Listener, height, latestBlockHeight uint64) error {
-	if latestBlockHeight-listener.GetSafeBlockRange() > height {
+func (c *Controller) processBehindBlock(ctx context.Context, client types.ChainClient, height, latestBlockHeight uint64) error {
+	if latestBlockHeight-client.GetSafeBlockRange() > height {
 		var (
-			safeBlock, block  Block
+			safeBlock, block  types.Block
 			tryCount          int
 			err               error
 			processedToHeight uint64
 		)
-		safeBlock, err = listener.GetBlock(latestBlockHeight - listener.GetSafeBlockRange())
+		safeBlock, err = client.GetBlock(ctx, latestBlockHeight-client.GetSafeBlockRange())
 		if err != nil {
 			log.Error("[Controller][Process] error while getting safeBlock", "err", err, "latest", latestBlockHeight)
 			return err
 		}
 		// process logs
-		if c.hasSubscriptionType[listener.GetName()][LogEvent] {
-			processedToHeight = c.processBatchLogs(listener, height, safeBlock.GetHeight())
+		if c.hasSubscriptionType[client.GetName()][types.JobTypeLog] {
+			processedToHeight = c.processBatchLogs(ctx, client, height, safeBlock.GetHeight())
 		}
 		// process transactions
-		if c.hasSubscriptionType[listener.GetName()][TxEvent] {
+		if c.hasSubscriptionType[client.GetName()][types.JobTypeTransaction] {
 			for height <= processedToHeight {
-				block, err = listener.GetBlock(height)
+				block, err = client.GetBlock(ctx, height)
 				if err != nil {
-					log.Error("[Controller][processBlock] error while get block", "err", err, "listener", listener.GetName(), "height", height)
+					log.Error("[Controller][processBlock] error while get block", "err", err, "listener", client.GetName(), "height", height)
 					tryCount++
 					time.Sleep(time.Duration(tryCount) * time.Second)
 					continue
 				}
 				height++
-				c.processTxs(listener, block.GetTransactions())
+				c.processTxs(ctx, client, block.GetTransactions())
+				// c.processTxs(listener, block.GetTrans actions())
 			}
 		}
 	}
 	return nil
 }
 
-func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight uint64) uint64 {
+func (c *Controller) processBatchLogs(ctx context.Context, client types.ChainClient, fromHeight, toHeight uint64) uint64 {
 	var (
 		contractAddresses []common.Address
 	)
-	chainId, err := listener.GetChainID()
+	chainId, err := client.GetChainID()
 	if err != nil {
-		log.Error("[Controller][processBatchLogs] error while getting chainID", "err", err, "listener", listener.GetName())
+		log.Error("[Controller][processBatchLogs] error while getting chainID", "err", err, "listener", client.GetName())
 		return fromHeight
 	}
+	chainIDHex := fmt.Sprintf("0x%x", chainId)
+
 	addedContract := make(map[common.Address]struct{})
 	filteredMethods := make(map[*abi.ABI]map[string]struct{})
 	eventIds := make(map[common.Hash]string)
-	for subscriptionName, subscription := range listener.GetSubscriptions() {
+	for _, subscription := range c.subscriptions {
 		name := subscription.Handler.Name
 		if filteredMethods[subscription.Handler.ABI] == nil {
 			filteredMethods[subscription.Handler.ABI] = make(map[string]struct{})
 		}
 		filteredMethods[subscription.Handler.ABI][name] = struct{}{}
-		eventIds[subscription.Handler.ABI.Events[name].ID] = subscriptionName
+		eventIds[subscription.Handler.ABI.Events[name].ID] = name
 		contractAddress := common.HexToAddress(subscription.To)
 
 		if _, ok := addedContract[contractAddress]; !ok {
@@ -418,94 +415,105 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 		}
 	}
 	retry := 0
-	batchSize := uint64(listener.Config().GetLogsBatchSize)
+
 	for fromHeight < toHeight {
 		if retry == 10 {
 			break
 		}
-		opts := &bind.FilterOpts{
-			Start:   fromHeight,
-			Context: c.ctx,
-		}
-		if fromHeight+batchSize < toHeight {
-			to := fromHeight + batchSize
-			opts.End = &to
+
+		var to uint64
+		if fromHeight+uint64(c.getLogBatchSize) < toHeight {
+			to = fromHeight + uint64(c.getLogBatchSize)
 		} else if fromHeight == toHeight-1 {
-			opts.End = &fromHeight
+			to = fromHeight
 		} else {
-			to := toHeight - 1
-			opts.End = &to
+			to = toHeight - 1
 		}
-		logs, err := c.utilWrapper.FilterLogs(listener.GetEthClient(), opts, contractAddresses, filteredMethods)
+
+		topics, err := utils.MakeTopics(filteredMethods)
 		if err != nil {
-			log.Error("[Controller][processBatchLogs] error while process batch logs", "err", err, "from", fromHeight, "to", opts.End)
+			log.Error("[Controller][processBatchLogs] error while process batch logs", "err", err, "from", fromHeight, "to", to)
 			retry++
 			continue
 		}
-		log.Trace("[Controller][processBatchLogs] finish getting logs", "from", opts.Start, "to", *opts.End, "logs", len(logs), "listener", listener.GetName())
-		processedBlocks := make(map[uint64]struct{})
-		jobs := make([]JobHandler, 0)
-		for i, eventLog := range logs {
-			eventId := eventLog.Topics[0]
-			log.Trace("[Controller][processBatchLogs] processing log", "topic", eventLog.Topics[0].Hex(), "address", eventLog.Address.Hex(), "transaction", eventLog.TxHash.Hex(), "listener", listener.GetName())
-			if _, ok := eventIds[eventId]; !ok {
-				continue
-			}
-			data, err := json.Marshal(eventLog)
-			if err != nil {
-				log.Error("[Controller] error while marshalling log", "err", err, "transaction", eventLog.TxHash.Hex(), "index", i)
-				continue
-			}
-			processedBlocks[eventLog.BlockNumber] = struct{}{}
-			name := eventIds[eventId]
-			tx := NewEmptyTransaction(chainId, eventLog.TxHash, eventLog.Data, nil, &eventLog.Address)
-			jobs = append(jobs, listener.GetListenHandleJob(name, tx, eventId.Hex(), data))
-		}
-		// cache processedBlocks and processedTxs
-		listener.CacheBlocks(processedBlocks)
+		logs, err := client.GetLogs(ctx, &types.GetLogsOption{
+			From:      big.NewInt(0).SetUint64(fromHeight),
+			To:        big.NewInt(0).SetUint64(to),
+			Addresses: contractAddresses,
+			Topics:    topics,
+		})
 
-		// loop through all JobHandler and enqueue them
-		for _, job := range jobs {
-			c.Pool.Enqueue(job)
+		if err != nil {
+			retry++
+			log.Error("[Controller][processBatchLogs] error while process batch logs", "err", err, "from", fromHeight, "to", to)
+			continue
 		}
+
+		log.Trace("[Controller][processBatchLogs] finish getting logs", "from", fromHeight, "to", toHeight, "logs", len(logs), "listener", client.GetName())
+		jobs := make([]types.Job[types.Log], 0)
+		jobs = append(jobs, types.Job[types.Log]{
+			Type:  types.JobTypeLog,
+			Name:  client.GetName(),
+			Event: "Swap",
+			Data:  &types.LogData{},
+		})
+		for _, eventLog := range logs {
+			topic := eventLog.GetTopics()[0]
+
+			job := types.Job[types.Log]{
+				Type:  types.JobTypeLog,
+				Name:  client.GetName(),
+				Event: eventIds[common.HexToHash(topic)],
+				Data:  eventLog,
+			}
+
+			jobs = append(jobs, job)
+
+		}
+
+		// enqueue jobs
+		c.logOrchestrator.Process(ctx, jobs...)
 
 		// update from height, and also update again from height's block
-		fromHeight = *opts.End + 1
-		block, _ := listener.GetBlock(fromHeight)
-		listener.UpdateCurrentBlock(block)
-		listener.SaveCurrentBlockToDB()
+		fromHeight = to + 1
+		if err := c.store.GetProcessedBlockStore().Save(chainIDHex, int64(fromHeight)); err != nil {
+			log.Error("[Controller] error while saving processed block", "err", err, "chainID", chainId.String(), "from", fromHeight)
+			continue
+		}
+
+		c.currentHeights[chainId] = fromHeight
+
 	}
 	return fromHeight
 }
 
-func (c *Controller) processTxs(listener Listener, txs []Transaction) {
+func (c *Controller) processTxs(ctx context.Context, client types.ChainClient, txs []types.Transaction) {
 	for _, tx := range txs {
 		if len(tx.GetData()) < 4 {
 			continue
 		}
 		// get receipt and check tx status
-		receipt, err := listener.GetReceipt(tx.GetHash())
-		if err != nil || receipt.Status != 1 {
+		receipt, err := client.GetReceipt(ctx, tx.GetHash())
+		if err != nil || !receipt.GetStatus() {
 			continue
 		}
-		for name, subscription := range listener.GetSubscriptions() {
-			if subscription.Handler == nil || subscription.Type != TxEvent {
+		// filter events
+		for name, subscription := range c.subscriptions {
+			if subscription.Handler == nil || subscription.Type != types.JobTypeLog {
 				continue
 			}
-			eventId := tx.GetData()[0:4]
-			data := tx.GetData()[4:]
-			if job := listener.GetListenHandleJob(name, tx, common.Bytes2Hex(eventId), data); job != nil {
-				c.Pool.Enqueue(job)
+			// eventId := tx.GetData()[0:4]
+			// data := tx.GetData()[4:]
+			job := types.Job[types.Transaction]{
+				Type:  types.JobTypeTransaction,
+				Name:  client.GetName(),
+				Event: name,
+				Data:  tx,
 			}
+
+			c.transactionOrchestrator.Process(ctx, job)
 		}
 	}
-}
-
-func (c *Controller) compareAddress(src, dst string) bool {
-	// remove prefix (0x, ronin) and lower text
-	src = strings.ToLower(strings.Replace(strings.Replace(src, "0x", "", 1), "ronin:", "", 1))
-	dst = strings.ToLower(strings.Replace(strings.Replace(dst, "0x", "", 1), "ronin:", "", 1))
-	return src == dst
 }
 
 func (c *Controller) LoadAbi(path string) (*abi.ABI, error) {
@@ -520,12 +528,11 @@ func (c *Controller) LoadAbi(path string) (*abi.ABI, error) {
 	return a, nil
 }
 
-func (c *Controller) Close() {
-	// load isClosed
-	val := c.Pool.IsClosed()
-	if !val {
-		log.Info("closing")
-		c.cancelFunc()
+func (c *Controller) Close(ctx context.Context) {
+	c.logOrchestrator.Stop(ctx)
+	c.transactionOrchestrator.Stop(ctx)
+
+	for _, v := range c.clients {
+		v.Close(ctx)
 	}
-	c.Pool.Wait()
 }

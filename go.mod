@@ -5,7 +5,7 @@ replace github.com/ethereum/go-ethereum => ../ronin
 go 1.19
 
 require (
-	github.com/axieinfinity/bridge-contracts v0.0.0-20220731110242-d273b578b657
+	github.com/axieinfinity/bridge-contracts v0.0.0-20230407060210-2b8fb645f3a4
 	github.com/axieinfinity/ronin-kms-client v0.0.0-20220805072849-960e04981b70
 	github.com/ethereum/go-ethereum v1.10.21
 	github.com/go-stack/stack v1.8.0
@@ -53,6 +53,7 @@ require (
 	github.com/mattn/go-runewidth v0.0.9 // indirect
 	github.com/mattn/go-sqlite3 v1.14.12 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
+	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/nxadm/tail v1.4.8 // indirect
 	github.com/olekukonko/tablewriter v0.0.5 // indirect
 	github.com/peterh/liner v1.1.1-0.20190123174540-a2c9a5303de7 // indirect

@@ -2,67 +2,49 @@ package types
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-	"fmt"
+
+	"github.com/ethereum/go-ethereum/log"
 )
 
-type Worker interface {
+type Worker[T any] interface {
 	ID() int
-	ProcessJob(ctx context.Context, job Job) error
+	ProcessJob(ctx context.Context, job Job[T]) error
 }
 
-type BridgeWorker struct {
-	ctx context.Context
-	id  int
-	// workerChan is used to receive and process job
-	workerChan     chan Job
-	listeners      map[string]Listener
-	eventStreaming *EventStreaming
+type LogWorker struct {
+	id        int
+	listeners map[string]Listener
 }
 
-func NewBridgeWorker(ctx context.Context, id int, listeners map[string]Listener) Worker {
-	return &BridgeWorker{
-		ctx:       ctx,
+func NewLogWorker(id int, listeners map[string]Listener) Worker[Log] {
+	return &LogWorker{
 		id:        id,
 		listeners: listeners,
 	}
 }
 
-func (w *BridgeWorker) ID() int {
+func (w *LogWorker) ID() int {
 	return w.id
 }
 
-func (w *BridgeWorker) String() string {
-	return fmt.Sprintf("{ id: %d, currentSize: %d }", w.id, len(w.workerChan))
-}
+var (
+	listener Listener
+	err      error
+	ok       bool
+)
 
-func (w *BridgeWorker) ProcessJob(ctx context.Context, job Job) error {
-	var (
-		payload map[string]interface{}
+func (w *LogWorker) ProcessJob(ctx context.Context, job Job[Log]) error {
 
-		listener Listener
-		event    string
-		ok       bool
-
-		args []interface{}
-	)
-	payload = job.Payload()
-	listener, ok = payload["Listener"].(Listener)
+	listener, ok = w.listeners[job.Name]
 	if !ok {
-		return errors.New("listener is not found")
+		log.Info("listener not found")
+		return nil
 	}
 
-	event, ok = payload["Event"].(string)
-	if !ok {
-		return errors.New("event is not found")
+	if err = listener.TriggerLog(ctx, job.Event, job.Data); err != nil {
+
+		return err
 	}
 
-	data, _ := json.Marshal(args)
-
-	w.eventStreaming.Publish(ctx, event, data)
-	// if job.GetType() == ListenHandler && job.GetSubscriptionName() != "" {
-	// 	job.GetListener().SendCallbackJobs(w.listeners, job.GetSubscriptionName(), job.GetTransaction(), val)
-	// }
 	return nil
 }
