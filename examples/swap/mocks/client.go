@@ -190,20 +190,43 @@ func (c *MockChain) Close(ctx context.Context) error {
 	return nil
 }
 
-func (c *MockChain) GenTransactions() []types.Transaction {
+func (c *MockChain) GenTransactions(amount int) []types.Transaction {
 	var (
-		result []types.Transaction
+		result []types.Transaction = make([]types.Transaction, 0, amount)
 	)
+
+	for i := 0; i < amount; i++ {
+		result = append(result, c.GenTransaction())
+	}
 
 	return result
 }
 
-func (c *MockChain) GenLogs() []types.Log {
+func (c *MockChain) GenTransaction() types.Transaction {
 	var (
-		result []types.Log
+		from = common.HexToAddress("b19ec5bf7c84d662fce465168b11d20cf1c26448")
+		to   = common.HexToAddress("7d0556d55ca1a92708681e2e231733ebd922597d")
+		hash = RandStringBytesMaskImprSrc(64)
 	)
 
-	result = append(result, c.GenLog())
+	transaction := &types.TransactionData{
+		Hash: common.HexToHash(hash),
+		From: &from,
+		To:   &to,
+		Data: []byte("f05b8c560000000000000000000000000000000000000000000000000000000df8476522000000000000000000000000000000000000000000000cbd6626267110c0c79000000000000000000000000000000000000000000000000000000000000000a0000000000000000000000000b19ec5bf7c84d662fce465168b11d20cf1c2644800000000000000000000000000000000000000000000000000000000645b551400000000000000000000000000000000000000000000000000000000000000020000000000000000000000000b7007c13325c48911f73a2dad5fa5dcbf808adc000000000000000000000000e514d9deb7966c8be0ca922de8a064264ea6bcd4"),
+	}
+
+	return transaction
+}
+
+func (c *MockChain) GenLogs(amount int) []types.Log {
+	var (
+		result []types.Log = make([]types.Log, 0, amount)
+	)
+
+	for i := 0; i < amount; i++ {
+		result = append(result, c.GenLog())
+	}
 
 	return result
 }
@@ -212,6 +235,7 @@ func (c *MockChain) GenLog() types.Log {
 	log := &types.LogData{
 		Address: common.HexToAddress("2ecb08f87f075b5769fe543d0e52e40140575ea7"),
 		Topics:  []common.Hash{common.HexToHash("d78ad95fa46c994b6551d0da85fc275fe613ce37657fb8d5e3d130840159d822")},
+		Data:    []byte("0000000000000000000000000000000000000000000000000000000df847652200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000cc41587c5744a164889"),
 		ExtraData: map[string]interface{}{
 			"id": c.logNumber,
 		},
@@ -228,8 +252,8 @@ func (c *MockChain) GenLog() types.Log {
 
 func (c *MockChain) Mine() types.Block {
 	hash := RandStringBytesMaskImprSrc(64)
-	transactions := c.GenTransactions()
-	logs := c.GenLogs()
+	transactions := c.GenTransactions(1)
+	logs := c.GenLogs(1)
 
 	block := &types.BlockData{
 		BlockNumber:  big.NewInt(0).SetUint64(c.blockNumber),

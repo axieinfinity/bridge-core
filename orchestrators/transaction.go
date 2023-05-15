@@ -28,8 +28,9 @@ type transactionOrchestrator struct {
 	failedJobChan chan types.Job[types.Transaction]
 	retryQueue    *queue.Queue[*retryJob[types.Transaction]]
 
-	stopped   atomic.Bool
-	processed int64 // for debugging purpose
+	stopped atomic.Bool
+
+	processed atomic.Int64 // for debugging purpose
 }
 
 func (s *transactionOrchestrator) Process(ctx context.Context, jobs ...types.Job[types.Transaction]) {
@@ -48,7 +49,6 @@ func (s *transactionOrchestrator) Start(ctx context.Context) error {
 	for {
 		select {
 		case j := <-s.jobChan:
-			// store job
 			if err := s.store.GetEventStore().Save(&models.Event{
 				EventName:       j.Event,
 				TransactionHash: j.Data.GetHash().Hex(),
@@ -58,8 +58,9 @@ func (s *transactionOrchestrator) Start(ctx context.Context) error {
 				log.Error(fmt.Sprintf("[%sListenJob][Process] error while storing event to database", j.Name), "err", err)
 			}
 
-			n := atomic.AddInt64(&s.processed, 1)
-			log.Info("processing job: ", "n", n)
+			n := s.processed.Add(1)
+			log.Debug("processing transaction", "n", n)
+
 			w := s.pool.Get()
 			err := w.ProcessJob(ctx, j)
 			if err != nil {
@@ -80,25 +81,39 @@ func (s *transactionOrchestrator) Start(ctx context.Context) error {
 				RetryCount:       j.RetryCount,
 				Type:             j.Type,
 			}); err != nil {
-				log.Error("save failed job got error", "err", err)
+				log.Error("Save failed jobs got error", "err", err)
 			}
 		case <-retryTicker.C:
-			log.Info("Hi mom im from job orchestrator")
-
 			now := time.Now().Unix()
 			for !s.retryQueue.Empty() && s.retryQueue.Peek().at <= now {
 				rj := s.retryQueue.Dequeue()
 				s.Process(ctx, rj.job)
 			}
 		case <-ctx.Done():
-			log.Info("Closing transaction service...")
+			log.Info("Closing transaction orchestrator...")
 			return nil
 		}
 	}
 }
 
 func (s *transactionOrchestrator) Stop(ctx context.Context) error {
-	log.Info("stop transaction orchestrator")
+	log.Info("Stopping transaction orchestrator")
+	s.stopped.Store(true)
+	for !s.retryQueue.Empty() {
+		rj := s.retryQueue.Dequeue()
+		if err := s.store.GetJobStore().Save(&models.Job{
+			ID:               rj.job.ID,
+			Listener:         rj.job.Name,
+			SubscriptionName: rj.job.Event,
+			Status:           stores.STATUS_FAILED,
+			RetryCount:       rj.job.RetryCount,
+			Type:             rj.job.Type,
+		}); err != nil {
+			log.Error("Store job to db got error", "err", err)
+		}
+	}
+	close(s.failedJobChan)
+	close(s.jobChan)
 
 	return nil
 }

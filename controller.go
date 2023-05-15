@@ -38,7 +38,6 @@ type Controller struct {
 	HandlerABIs map[string]*abi.ABI
 	utilWrapper utils.Utils
 
-	cfg             *types.Config
 	getLogBatchSize int
 
 	store               stores.MainStore
@@ -61,10 +60,6 @@ func New(
 	logOrchestrator orchestrators.LogOrchestrator,
 	transactionOrchestrator orchestrators.TransactionOrchestrator,
 ) *Controller {
-	// if cfg.NumberOfWorkers <= 0 {
-	// 	cfg.NumberOfWorkers = types.DefaultWorkers
-	// }
-
 	c := &Controller{
 		clients:             clients,
 		HandlerABIs:         make(map[string]*abi.ABI),
@@ -95,64 +90,6 @@ func New(
 		c.hasSubscriptionType[k][v.Type] = true
 	}
 
-	// if adapters.AppConfig.Prometheus.TurnOn {
-	// 	metrics.RunPusher(ctx)
-	// }
-
-	// if helpers != nil {
-	// 	c.utilWrapper = helpers
-	// }
-
-	// add listeners from config
-	// for name, lsConfig := range c.cfg.Listeners {
-	// 	if lsConfig.LoadInterval <= 0 {
-	// 		lsConfig.LoadInterval = defaultTaskInterval
-	// 	}
-	// 	lsConfig.LoadInterval *= time.Second
-	// 	lsConfig.Name = name
-
-	// 	// load abi from lsConfig
-	// 	if err := c.LoadABIsFromConfig(lsConfig); err != nil {
-	// 		return nil, err
-	// 	}
-
-	// 	// Invoke init function which is based on listener's name
-	// 	initFunc, ok := listeners[name]
-	// 	if !ok {
-	// 		continue
-	// 	}
-	// 	l := initFunc(c.ctx, lsConfig, c.store, c.utilWrapper, c.Pool)
-	// 	if l == nil {
-	// 		return nil, errors.New("listener is nil")
-	// 	}
-
-	// 	// set listeners to listeners
-	// 	l.AddListeners(c.listeners)
-
-	// 	// add listener to controller
-	// 	c.listeners[name] = l
-	// 	c.hasSubscriptionType[name] = make(map[int]bool)
-
-	// 	if lsConfig.GetLogsBatchSize == 0 {
-	// 		lsConfig.GetLogsBatchSize = defaultBatchSize
-	// 	}
-
-	// 	// filtering subscription, get all subscriptionType available for each listener
-	// 	for _, subscription := range l.GetSubscriptions() {
-	// 		if c.hasSubscriptionType[name][subscription.Type] {
-	// 			continue
-	// 		}
-	// 		c.hasSubscriptionType[name][subscription.Type] = true
-	// 	}
-	// }
-
-	// var workers []types.Worker
-	// // init workers
-	// for i := 0; i < cfg.NumberOfWorkers; i++ {
-	// 	w := types.NewWorker(ctx, i, c.Pool.MaxQueueSize, c.listeners)
-	// 	workers = append(workers, w)
-	// }
-	// c.Pool.AddWorkers(workers)
 	return c
 }
 
@@ -329,7 +266,6 @@ func (c *Controller) startListening(ctx context.Context, client types.ChainClien
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			log.Info("ehhh")
 			latestHeight, err := client.GetLatestBlockHeight(ctx)
 			if err != nil {
 				log.Error("[Controller][Watcher] error while get latest block height", "err", err)
@@ -379,7 +315,6 @@ func (c *Controller) processBehindBlock(ctx context.Context, client types.ChainC
 				}
 				height++
 				c.processTxs(ctx, client, block.GetTransactions())
-				// c.processTxs(listener, block.GetTrans actions())
 			}
 		}
 	}
@@ -502,8 +437,7 @@ func (c *Controller) processTxs(ctx context.Context, client types.ChainClient, t
 			if subscription.Handler == nil || subscription.Type != types.JobTypeLog {
 				continue
 			}
-			// eventId := tx.GetData()[0:4]
-			// data := tx.GetData()[4:]
+
 			job := types.Job[types.Transaction]{
 				Type:  types.JobTypeTransaction,
 				Name:  client.GetName(),
@@ -514,18 +448,6 @@ func (c *Controller) processTxs(ctx context.Context, client types.ChainClient, t
 			c.transactionOrchestrator.Process(ctx, job)
 		}
 	}
-}
-
-func (c *Controller) LoadAbi(path string) (*abi.ABI, error) {
-	if _, ok := c.HandlerABIs[path]; ok {
-		return c.HandlerABIs[path], nil
-	}
-	a, err := c.utilWrapper.LoadAbi(path)
-	if err != nil {
-		return nil, err
-	}
-	c.HandlerABIs[path] = a
-	return a, nil
 }
 
 func (c *Controller) Close(ctx context.Context) {

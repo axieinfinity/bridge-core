@@ -18,10 +18,10 @@ import (
 )
 
 func main() {
-	elog.Root().SetHandler(elog.LvlFilterHandler(elog.LvlInfo, elog.StreamHandler(os.Stderr, elog.TerminalFormat(true))))
+	elog.Root().SetHandler(elog.LvlFilterHandler(elog.LvlDebug, elog.StreamHandler(os.Stderr, elog.TerminalFormat(true))))
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-
+	ctx, cancel := context.WithCancel(context.Background())
+	// defer cancel()
 	db, err := stores.MustConnectDatabase(&stores.Database{
 		Host:     configs.AppConfig.DB.Host,
 		User:     configs.AppConfig.DB.User,
@@ -40,9 +40,13 @@ func main() {
 		listeners          = make(map[string]types.Listener)
 	)
 
+	listeners["Mock"] = mocks.NewMockListener()
+
 	for i := 0; i < 1000; i++ {
 		logWorkers = append(logWorkers, types.NewLogWorker(i, listeners))
+		transactionWorkers = append(transactionWorkers, types.NewTransactionWorker(i, listeners))
 	}
+
 	var (
 		clients         = make(map[string]types.ChainClient)
 		subscriptions   = make(map[string]*types.Subscribe)
@@ -51,12 +55,13 @@ func main() {
 		// util            = utils.NewUtils()
 	)
 
+	mockChain := mocks.NewMockChain(big.NewInt(2023), "Mock", time.Millisecond*10)
+
 	// eth, err := util.NewEthClient("https://saigon-testnet.roninchain.com/rpc")
 	// if err != nil {
 	// 	panic(err)
 	// }
 
-	mockChain := mocks.NewMockChain(big.NewInt(2023), "Mock", time.Millisecond*10)
 	// subscriptions["Ronin"] = &types.Subscribe{
 	// 	To:   "fd25f2eb3d5ead58b47cd4af645f1c136d8f0455",
 	// 	Type: 1,
@@ -110,10 +115,9 @@ func main() {
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
 	<-c
-
-	log.Printf("shutting down")
-
 	cancel()
+
+	log.Printf("Shutting down...")
 	controller.Close(ctx)
-	// time.Sleep(time.Second * 3)
+	time.Sleep(time.Second)
 }

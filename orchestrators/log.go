@@ -45,7 +45,7 @@ type jobOrchestrator struct {
 
 	stopped atomic.Bool
 
-	processed int64 // for debugging purpose
+	processed atomic.Int64 // for debugging purpose
 }
 
 type retryJob[T any] struct {
@@ -79,8 +79,8 @@ func (s *jobOrchestrator) Start(ctx context.Context) error {
 				log.Error(fmt.Sprintf("[%sListenJob][Process] error while storing event to database", j.Name), "err", err)
 			}
 
-			n := atomic.AddInt64(&s.processed, 1)
-			log.Info("processing job: ", "n", n)
+			n := s.processed.Add(1)
+			log.Debug("processing job", "n", n)
 			w := s.pool.Get()
 			err := w.ProcessJob(ctx, j)
 			if err != nil {
@@ -101,24 +101,21 @@ func (s *jobOrchestrator) Start(ctx context.Context) error {
 				RetryCount:       j.RetryCount,
 				Type:             j.Type,
 			})
-			// j.Save(stores.STATUS_FAILED)
 		case <-retryTicker.C:
-			log.Info("Hi mom im from log orchestrator")
-
 			now := time.Now().Unix()
 			for !s.retryQueue.Empty() && s.retryQueue.Peek().at <= now {
 				rj := s.retryQueue.Dequeue()
 				s.Process(ctx, rj.job)
 			}
 		case <-ctx.Done():
-			log.Info("Closing job service...")
+			log.Info("Closing log orchestrator...")
 			return nil
 		}
 	}
 }
 
 func (s *jobOrchestrator) Stop(ctx context.Context) error {
-	log.Info("stop log orchestrator")
+	log.Info("Stopping log orchestrator")
 	s.stopped.Store(true)
 	for !s.retryQueue.Empty() {
 		rj := s.retryQueue.Dequeue()
@@ -134,6 +131,7 @@ func (s *jobOrchestrator) Stop(ctx context.Context) error {
 		}
 	}
 	close(s.failedJobChan)
+	close(s.jobChan)
 	return nil
 }
 

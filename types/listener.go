@@ -20,7 +20,7 @@ type Listener interface {
 	// GetReceipt(common.Hash) (*types.Receipt, error)
 	// Context() context.Context
 
-	GetSubscriptions() map[string]*Subscribe
+	// GetSubscriptions() map[string]*Subscribe
 
 	// UpdateCurrentBlock(block Block) error
 
@@ -28,12 +28,13 @@ type Listener interface {
 	// SaveTransactionsToDB(txs []Transaction) error
 
 	// GetListenHandleJob(subscriptionName string, tx Transaction, eventId string, data []byte) Job
-	SendCallbackJobs(listeners map[string]Listener, subscriptionName string, tx Transaction, inputData []byte)
+	// SendCallbackJobs(listeners map[string]Listener, subscriptionName string, tx Transaction, inputData []byte)
 
 	TriggerLog(ctx context.Context, event string, data Log) error
 	TriggerTransaction(ctx context.Context, event string, data Transaction) error
-	Start()
-	Close()
+	// Start()
+
+	// Close()
 
 	// IsDisabled() bool
 	// SetInitHeight(uint64)
@@ -45,7 +46,7 @@ type Listener interface {
 	// GetTask(index int) TaskHandler
 	// AddTask(handler TaskHandler)
 
-	IsUpTodate() bool
+	// IsUpTodate() bool
 
 	// GetBridgeOperatorSign() utils.ISign
 	// GetVoterSign() utils.ISign
