@@ -11,16 +11,34 @@ import (
 	"github.com/ethereum/go-ethereum/log"
 )
 
+type KmsConfig struct {
+	KeyTokenPath  string `json:"keyTokenPath" mapstructure:"keyTokenPath"`
+	SslCertPath   string `json:"sslCertPath" mapstructure:"sslCertPath"`
+	KmsServerAddr string `json:"kmsServerAddr" mapstructure:"kmsServerAddr"`
+	KmsSourceAddr string `json:"kmsSourceAddr" mapstructure:"kmsSourceAddr"`
+	SignTimeout   int64  `json:"signTimeout" mapstructure:"signTimeout"`
+}
+
+func (k *KmsConfig) toKMSConfig() *kms.KmsConfig {
+	return &kms.KmsConfig{
+		KeyTokenPath:  k.KeyTokenPath,
+		SslCertPath:   k.SslCertPath,
+		KmsServerAddr: k.KmsServerAddr,
+		KmsSourceAddr: k.KmsSourceAddr,
+		SignTimeout:   k.SignTimeout,
+	}
+}
+
 type SignMethodConfig struct {
-	PlainPrivateKey string         `json:"plainPrivateKey,omitempty"`
-	KmsConfig       *kms.KmsConfig `json:"kmsConfig,omitempty"`
+	PlainPrivateKey string     `json:"plainPrivateKey,omitempty" mapstructure:"plainPrivateKey"`
+	KmsConfig       *KmsConfig `json:"kmsConfig,omitempty" mapstructure:"kmsConfig,omitempty"`
 }
 
 func NewSignMethod(config *SignMethodConfig) (ISign, error) {
 	if config.PlainPrivateKey != "" {
 		return NewPrivateKeySign(config.PlainPrivateKey)
 	} else if config.KmsConfig != nil {
-		return NewKmsSign(config.KmsConfig)
+		return NewKmsSign(config.KmsConfig.toKMSConfig())
 	}
 
 	log.Warn("No sign methods provided")
