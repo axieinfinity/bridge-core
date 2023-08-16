@@ -20,15 +20,15 @@ const (
 )
 
 type Database struct {
-	Host     string `json:"host"`
-	User     string `json:"user"`
-	Password string `json:"password"`
-	DBName   string `json:"dbName"`
-	Port     int    `json:"port"`
+	Host     string `json:"host" mapstructure:"host"`
+	User     string `json:"user" mapstructure:"user"`
+	Password string `json:"password" mapstructure:"password"`
+	DBName   string `json:"dbName" mapstructure:"dbName"`
+	Port     int    `json:"port" mapstructure:"port"`
 
-	ConnMaxLifetime int `json:"connMaxLifeTime"`
-	MaxIdleConns    int `json:"maxIdleConns"`
-	MaxOpenConns    int `json:"maxOpenConns"`
+	ConnMaxLifetime int `json:"connMaxLifeTime" mapstructure:"connMaxLifeTime"`
+	MaxIdleConns    int `json:"maxIdleConns" mapstructure:"maxIdleConns"`
+	MaxOpenConns    int `json:"maxOpenConns" mapstructure:"maxOpenConns"`
 }
 
 type JobStore interface {
