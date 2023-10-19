@@ -12,7 +12,7 @@ import (
 )
 
 type SignMethodConfig struct {
-	PlainPrivateKey string         `json:"plainPrivateKey,omitempty"`
+	PlainPrivateKey string         `json:"plainPrivateKey,omitempty" mapstructure:"plainPrivateKey"`
 	KmsConfig       *kms.KmsConfig `json:"kmsConfig,omitempty"`
 }
 
