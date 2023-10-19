@@ -145,81 +145,81 @@ type TaskHandler interface {
 }
 
 type Config struct {
-	Listeners       map[string]*LsConfig `json:"listeners"`
-	NumberOfWorkers int                  `json:"numberOfWorkers"`
-	MaxQueueSize    int                  `json:"maxQueueSize"`
-	MaxRetry        int32                `json:"maxRetry"`
-	BackOff         int32                `json:"backoff"`
-	DB              *stores.Database     `json:"database"`
+	Listeners       map[string]*LsConfig `json:"listeners" mapstructure:"listeners"`
+	NumberOfWorkers int                  `json:"numberOfWorkers" mapstructure:"numberOfWorkers"`
+	MaxQueueSize    int                  `json:"maxQueueSize" mapstructure:"maxQueueSize"`
+	MaxRetry        int32                `json:"maxRetry" mapstructure:"maxRetry"`
+	BackOff         int32                `json:"backoff" mapstructure:"backoff"`
+	DB              *stores.Database     `json:"database" mapstructure:"database"`
 
 	// this field is used for testing purpose
 	Testing bool
 }
 
 type LsConfig struct {
-	ChainId        string        `json:"chainId"`
+	ChainId        string        `json:"chainId" mapstructure:"chainId"`
 	Name           string        `json:"-"`
-	RpcUrl         string        `json:"rpcUrl"`
-	LoadInterval   time.Duration `json:"blockTime"`
-	SafeBlockRange uint64        `json:"safeBlockRange"`
-	FromHeight     uint64        `json:"fromHeight"`
-	TaskInterval   time.Duration `json:"taskInterval"`
-	Disabled       bool          `json:"disabled"`
+	RpcUrl         string        `json:"rpcUrl" mapstructure:"rpcUrl"`
+	LoadInterval   time.Duration `json:"blockTime" mapstructure:"blockTime"`
+	SafeBlockRange uint64        `json:"safeBlockRange" mapstructure:"safeBlockRange"`
+	FromHeight     uint64        `json:"fromHeight" mapstructure:"fromHeight"`
+	TaskInterval   time.Duration `json:"taskInterval" mapstructure:"taskInterval"`
+	Disabled       bool          `json:"disabled" mapstructure:"disabled"`
 
 	// TODO: apply more ways to get privatekey. such as: PLAINTEXT, KMS, etc.
-	Secret                 *Secret               `json:"secret"`
-	Subscriptions          map[string]*Subscribe `json:"subscriptions"`
-	TransactionCheckPeriod time.Duration         `json:"transactionCheckPeriod"`
-	Contracts              map[string]string     `json:"contracts"`
-	ProcessWithinBlocks    uint64                `json:"processWithinBlocks"`
+	Secret                 *Secret               `json:"secret" mapstructure:"secret"`
+	Subscriptions          map[string]*Subscribe `json:"subscriptions" mapstructure:"subscriptions"`
+	TransactionCheckPeriod time.Duration         `json:"transactionCheckPeriod" mapstructure:"transactionCheckPeriod"`
+	Contracts              map[string]string     `json:"contracts" mapstructure:"contracts"`
+	ProcessWithinBlocks    uint64                `json:"processWithinBlocks" mapstructure:"processWithinBlocks"`
 
-	MaxTasksQuery int `json:"maxTasksQuery"`
-	MinTasksQuery int `json:"minTasksQuery"`
+	MaxTasksQuery int `json:"maxTasksQuery" mapstructure:"maxTasksQuery"`
+	MinTasksQuery int `json:"minTasksQuery" mapstructure:"minTasksQuery"`
 
 	// GetLogsBatchSize is used at batch size when calling processBatchLogs
-	GetLogsBatchSize int `json:"getLogsBatchSize"`
+	GetLogsBatchSize int `json:"getLogsBatchSize" mapstructure:"getLogsBatchSize"`
 
 	// MaxProcessingTasks is used to specify max processing tasks allowed while processing tasks
 	// if number of tasks reaches this number, it waits until this number decrease
-	MaxProcessingTasks int    `json:"maxProcessingTasks"`
-	GasLimitBumpRatio  uint64 `json:"gasLimitBumpRatio"`
+	MaxProcessingTasks int    `json:"maxProcessingTasks" mapstructure:"maxProcessingTasks"`
+	GasLimitBumpRatio  uint64 `json:"gasLimitBumpRatio" mapstructure:"gasLimitBumpRatio"`
 }
 
 type Secret struct {
-	BridgeOperator       *utils.SignMethodConfig `json:"bridgeOperator"`
-	Voter                *utils.SignMethodConfig `json:"voter"`
-	Relayer              *utils.SignMethodConfig `json:"relayer"`
-	LegacyBridgeOperator *utils.SignMethodConfig `json:"legacyBridgeOperator"`
+	BridgeOperator       *utils.SignMethodConfig `json:"bridgeOperator" mapstructure:"bridgeOperator"`
+	Voter                *utils.SignMethodConfig `json:"voter" mapstructure:"voter"`
+	Relayer              *utils.SignMethodConfig `json:"relayer" mapstructure:"relayer"`
+	LegacyBridgeOperator *utils.SignMethodConfig `json:"legacyBridgeOperator" mapstructure:"legacyBridgeOperator"`
 }
 
 type Subscribe struct {
-	From string `json:"from"`
-	To   string `json:"to"`
+	From string `json:"from" mapstructure:"from"`
+	To   string `json:"to" mapstructure:"to"`
 
 	// Type can be either TxEvent or LogEvent
-	Type int `json:"type"`
+	Type int `json:"type" mapstructure:"type"`
 
-	Handler   *Handler          `json:"handler"`
-	CallBacks map[string]string `json:"callbacks"`
+	Handler   *Handler          `json:"handler" mapstructure:"handler"`
+	CallBacks map[string]string `json:"callbacks" mapstructure:"callbacks"`
 }
 
 type Handler struct {
 	// Contract Name that will be used to get ABI
-	Contract string `json:"contract"`
+	Contract string `json:"contract" mapstructure:"contract"`
 
 	// Name is method/event name
-	Name string `json:"name"`
+	Name string `json:"name" mapstructure:"name"`
 
 	// ContractAddress is used in callback case
-	ContractAddress string `json:"contractAddress"`
+	ContractAddress string `json:"contractAddress" mapstructure:"contractAddress"`
 
 	// Listener who triggers callback event
-	Listener string `json:"listener"`
+	Listener string `json:"listener" mapstructure:"listener"`
 
 	ABI *abi.ABI `json:"-"`
 
 	// HandleMethod is used when processing listened job, do nothing if it is empty
-	HandleMethod string `json:"handleMethod"`
+	HandleMethod string `json:"handleMethod" mapstructure:"handleMethod"`
 }
 
 type EmptyTransaction struct {
