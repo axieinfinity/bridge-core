@@ -387,6 +387,11 @@ func (c *Controller) processBehindBlock(listener Listener, height, latestBlockHe
 	return nil
 }
 
+type eventMapKey struct {
+	topic   common.Hash
+	address common.Address
+}
+
 func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight uint64) uint64 {
 	var (
 		contractAddresses []common.Address
@@ -398,14 +403,19 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 	}
 	addedContract := make(map[common.Address]struct{})
 	filteredMethods := make(map[*abi.ABI]map[string]struct{})
-	eventIds := make(map[common.Hash]string)
+	eventIds := make(map[eventMapKey]string)
 	for subscriptionName, subscription := range listener.GetSubscriptions() {
 		name := subscription.Handler.Name
 		if filteredMethods[subscription.Handler.ABI] == nil {
 			filteredMethods[subscription.Handler.ABI] = make(map[string]struct{})
 		}
 		filteredMethods[subscription.Handler.ABI][name] = struct{}{}
-		eventIds[subscription.Handler.ABI.Events[name].ID] = subscriptionName
+
+		key := eventMapKey{
+			topic:   subscription.Handler.ABI.Events[name].ID,
+			address: common.HexToAddress(subscription.To),
+		}
+		eventIds[key] = subscriptionName
 		contractAddress := common.HexToAddress(subscription.To)
 
 		if _, ok := addedContract[contractAddress]; !ok {
@@ -444,7 +454,12 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 		for i, eventLog := range logs {
 			eventId := eventLog.Topics[0]
 			log.Trace("[Controller][processBatchLogs] processing log", "topic", eventLog.Topics[0].Hex(), "address", eventLog.Address.Hex(), "transaction", eventLog.TxHash.Hex(), "listener", listener.GetName())
-			if _, ok := eventIds[eventId]; !ok {
+			lookupKey := eventMapKey{
+				topic:   eventId,
+				address: eventLog.Address,
+			}
+
+			if _, ok := eventIds[lookupKey]; !ok {
 				continue
 			}
 			data, err := json.Marshal(eventLog)
@@ -453,7 +468,7 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 				continue
 			}
 			processedBlocks[eventLog.BlockNumber] = struct{}{}
-			name := eventIds[eventId]
+			name := eventIds[lookupKey]
 			tx := NewEmptyTransaction(chainId, eventLog.TxHash, eventLog.Data, nil, &eventLog.Address)
 			jobs = append(jobs, listener.GetListenHandleJob(name, tx, eventId.Hex(), data))
 		}
