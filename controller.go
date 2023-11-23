@@ -57,14 +57,17 @@ type Controller struct {
 }
 
 func New(cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
+	return NewWithContext(context.Background(), cfg, db, helpers)
+}
+
+func NewWithContext(ctx context.Context, cfg *Config, db *gorm.DB, helpers utils.Utils) (*Controller, error) {
 	if cfg.NumberOfWorkers <= 0 {
 		cfg.NumberOfWorkers = defaultWorkers
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
+	newCtx, cancel := context.WithCancel(ctx)
 	c := &Controller{
 		cfg:                 cfg,
-		ctx:                 ctx,
+		ctx:                 newCtx,
 		cancelFunc:          cancel,
 		listeners:           make(map[string]Listener),
 		HandlerABIs:         make(map[string]*abi.ABI),
