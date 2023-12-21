@@ -472,7 +472,7 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 			}
 			processedBlocks[eventLog.BlockNumber] = struct{}{}
 			name := eventIds[lookupKey]
-			tx := NewEmptyTransaction(chainId, eventLog.TxHash, eventLog.Data, nil, &eventLog.Address)
+			tx := NewEmptyTransaction(chainId, eventLog.TxHash, eventLog.Data, nil, &eventLog.Address, eventLog.BlockNumber)
 			jobs = append(jobs, listener.GetListenHandleJob(name, tx, eventId.Hex(), data))
 		}
 		// cache processedBlocks and processedTxs

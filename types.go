@@ -84,6 +84,7 @@ type Transaction interface {
 	GetToAddress() string
 	GetData() []byte
 	GetValue() *big.Int
+	BlockNumber() uint64
 }
 
 type Log interface {
@@ -231,19 +232,21 @@ type Handler struct {
 }
 
 type EmptyTransaction struct {
-	chainId  *big.Int
-	hash     common.Hash
-	from, to *common.Address
-	data     []byte
+	chainId     *big.Int
+	hash        common.Hash
+	from, to    *common.Address
+	blockNumber uint64
+	data        []byte
 }
 
-func NewEmptyTransaction(chainId *big.Int, tx common.Hash, data []byte, from, to *common.Address) *EmptyTransaction {
+func NewEmptyTransaction(chainId *big.Int, tx common.Hash, data []byte, from, to *common.Address, blockNumber uint64) *EmptyTransaction {
 	return &EmptyTransaction{
-		chainId: chainId,
-		hash:    tx,
-		from:    from,
-		to:      to,
-		data:    data,
+		chainId:     chainId,
+		hash:        tx,
+		from:        from,
+		to:          to,
+		data:        data,
+		blockNumber: blockNumber,
 	}
 }
 
@@ -270,4 +273,8 @@ func (b *EmptyTransaction) GetData() []byte {
 
 func (b *EmptyTransaction) GetValue() *big.Int {
 	return nil
+}
+
+func (b *EmptyTransaction) BlockNumber() uint64 {
+	return b.blockNumber
 }
