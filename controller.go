@@ -407,7 +407,7 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 	addedContract := make(map[common.Address]struct{})
 	filteredMethods := make(map[*abi.ABI]map[string]struct{})
 	eventIds := make(map[eventMapKey]string)
-	for subscriptionName, subscription := range listener.GetSubscriptions() {
+	for _, subscription := range listener.GetSubscriptions() {
 		name := subscription.Handler.Name
 		if filteredMethods[subscription.Handler.ABI] == nil {
 			filteredMethods[subscription.Handler.ABI] = make(map[string]struct{})
@@ -418,7 +418,7 @@ func (c *Controller) processBatchLogs(listener Listener, fromHeight, toHeight ui
 			topic:   subscription.Handler.ABI.Events[name].ID,
 			address: common.HexToAddress(subscription.To),
 		}
-		eventIds[key] = subscriptionName
+		eventIds[key] = name
 		contractAddress := common.HexToAddress(subscription.To)
 
 		if _, ok := addedContract[contractAddress]; !ok {
