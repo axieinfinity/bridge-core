@@ -64,10 +64,10 @@ func NewWithContext(ctx context.Context, cfg *Config, db *gorm.DB, helpers utils
 	if cfg.NumberOfWorkers <= 0 {
 		cfg.NumberOfWorkers = defaultWorkers
 	}
-	newCtx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(ctx)
 	c := &Controller{
 		cfg:                 cfg,
-		ctx:                 newCtx,
+		ctx:                 ctx,
 		cancelFunc:          cancel,
 		listeners:           make(map[string]Listener),
 		HandlerABIs:         make(map[string]*abi.ABI),
