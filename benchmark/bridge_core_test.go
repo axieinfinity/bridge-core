@@ -3,11 +3,6 @@ package benchmark
 import (
 	"context"
 	"fmt"
-	bridge_core "github.com/axieinfinity/bridge-core"
-	"github.com/axieinfinity/bridge-core/models"
-	"github.com/axieinfinity/bridge-core/stores"
-	"github.com/ethereum/go-ethereum/common"
-	"gorm.io/gorm"
 	"math/big"
 	"math/rand"
 	"os"
@@ -15,11 +10,15 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	bridge_core "github.com/axieinfinity/bridge-core"
+	"github.com/axieinfinity/bridge-core/models"
+	"github.com/axieinfinity/bridge-core/stores"
+	"github.com/ethereum/go-ethereum/common"
+	"gorm.io/gorm"
 )
 
-var (
-	testData = make([]string, 0)
-)
+var testData = make([]string, 0)
 
 func init() {
 	dataLength, _ := strconv.Atoi(os.Getenv("size"))
@@ -107,6 +106,7 @@ func (e *Job) Hash() common.Hash {
 func (e *Job) IncreaseRetryCount() {
 	e.retryCount++
 }
+
 func (e *Job) UpdateNextTry(nextTry int64) {
 	e.nextTry = nextTry
 }
@@ -123,7 +123,7 @@ func (e *Job) GetTransaction() bridge_core.Transaction {
 	return nil
 }
 
-func (e *Job) Save() error {
+func (e *Job) Save(string) error {
 	return nil
 }
 

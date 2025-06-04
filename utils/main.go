@@ -10,10 +10,6 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/rlp"
-	"golang.org/x/crypto/sha3"
-
 	kmsUtils "github.com/axieinfinity/ronin-kms-client/utils"
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts/abi"
@@ -21,8 +17,11 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/ethereum/go-ethereum/rlp"
 	"github.com/ethereum/go-ethereum/signer/core"
+	"golang.org/x/crypto/sha3"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -242,7 +241,7 @@ func (u *utils) FilterLogs(client EthClient, opts *bind.FilterOpts, contractAddr
 	)
 
 	for contractAbi, methods := range filteredMethods {
-		for method, _ := range methods {
+		for method := range methods {
 			if _, ok := contractAbi.Events[method]; ok {
 				events = append(events, contractAbi.Events[method].ID)
 			}
