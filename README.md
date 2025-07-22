@@ -1,6 +1,6 @@
 # Bridge-core
-Bridge core is an event fetching library. This library automatically fetch logs from chain then invoke the perspective events. Callback functions will be provided in application side.
-## How to create an applicationn
+Bridge-core is an event fetching library. This library automatically fetches logs from chain then invokes the respective events. Callback functions will be provided on the application side.
+## How to create an application
 ### Preparation
 
 Firstly, we need to clone ronin for go-ethereum replacement later.
@@ -15,7 +15,7 @@ cd app
 go mod init app
 ```
 
-Inside `go.mod`, we add this line. By doing this, we replace go-ethereum module by ronin module which cloned from above
+Inside `go.mod`, we add this line. By doing this, we replace go-ethereum module with ronin module which was cloned from above
 
 ```
 replace github.com/ethereum/go-ethereum => ../ronin
@@ -62,7 +62,7 @@ func (l *ConreteListener) WithdrewCallback(fromChainId *big.Int, tx bridge_core.
 }
 ```
 
-Next, we create an instance of controller. Before creating, we need to call `AddListener` method which receives `ChainName` and an initalizing function returning an instance of `Listener`.
+Next, we create an instance of controller. Before creating, we need to call `AddListener` method which receives `ChainName` and an initializing function returning an instance of `Listener`.
 
 Type of init function:
 ```go
@@ -134,7 +134,7 @@ we need a configuration:
 	}
 ```
 
-Config includes a map representing the configuration on this chain. This configuration includes chain id, a map of subscription provides information about event listener and callback, these information are provided inside `Handler` and `Callbacks` perspectively.
+Config includes a map representing the configuration on this chain. This configuration includes chain id, a map of subscription provides information about event listener and callback, this information is provided inside `Handler` and `Callbacks` respectively.
 
 ## Examples
 See [Example](examples/) for sample use cases.
